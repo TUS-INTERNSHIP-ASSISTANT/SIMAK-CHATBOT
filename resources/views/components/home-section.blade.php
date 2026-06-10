@@ -55,7 +55,9 @@
             hover:bg-[#5A182C]
             transition duration-300"
     >
+    <a href="#tanya-simak">
         Mulai Bertanya
+    </a>
     </button>
 
 </div>

@@ -21,11 +21,6 @@ class UserSeeder extends Seeder
             'role' => 'staff',
         ]);
 
-        User::create([
-            'name' => 'Student Demo',
-            'email' => 'student@simak.com',
-            'password' => Hash::make('password'),
-            'role' => 'student',
-        ]);
+
     }
 }

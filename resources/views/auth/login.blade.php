@@ -48,25 +48,30 @@
                 <div class="w-full h-px bg-gray-300 my-8"></div>
 
                 <!-- FORM -->
-                <form class="space-y-6">
+                <form class="space-y-6" x-data="loginForm()" @submit.prevent="submit">
 
-                    <!-- Username -->
+                    <!-- Alert Error -->
+                    <div x-show="errorMessage" style="display: none;" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                        <span class="block sm:inline" x-text="errorMessage"></span>
+                    </div>
+
+                    <!-- Email -->
                     <div>
                         <label class="block mb-2 font-semibold text-[#7A203A]">
-                            Username
+                            Email Staff
                         </label>
 
-                        <input type="text" class="w-full h-14 px-5 rounded-2xl border border-gray-300 bg-white focus:outline-none focus:ring-2focus:ring-[#7A203A]">
+                        <input type="email" x-model="email" required class="w-full h-14 px-5 rounded-2xl border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#7A203A]">
                     </div>
 
                     <!-- Password -->
-                    <div x-data="{ showPassword: false }">
+                    <div>
                         <label class="block mb-2 font-semibold text-[#7A203A]">
                             Password
                         </label>
 
                         <div class="relative">
-                            <input :type="showPassword ? 'text' : 'password'" class="w-full h-14 px-5 pr-12 rounded-2xl border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#7A203A]">
+                            <input :type="showPassword ? 'text' : 'password'" x-model="password" required class="w-full h-14 px-5 pr-12 rounded-2xl border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#7A203A]">
 
                             <button type="button"
                                 @click="showPassword = !showPassword"
@@ -91,6 +96,7 @@
                                 <!-- Eye Slash -->
                                 <svg
                                     x-show="showPassword"
+                                    style="display: none;"
                                     xmlns="http://www.w3.org/2000/svg"
                                     fill="none"
                                     viewBox="0 0 24 24"
@@ -111,11 +117,49 @@
 
                     <!-- Button -->
                     <div class="pt-4 flex justify-center">
-                        <button type="submit" class="w-48 h-12 rounded-2xl border border-[#7A203A] text-[#7A203A] font-semibold hover:bg-[#7A203A] hover:text-white transition-all duration-300">
-                            Masuk
+                        <button type="submit" :disabled="isLoading" class="w-48 h-12 rounded-2xl border border-[#7A203A] text-[#7A203A] font-semibold hover:bg-[#7A203A] hover:text-white transition-all duration-300 disabled:opacity-50">
+                            <span x-show="!isLoading">Masuk</span>
+                            <span x-show="isLoading" style="display: none;">Loading...</span>
                         </button>
                     </div>
                 </form>
+
+                <script>
+                    document.addEventListener('alpine:init', () => {
+                        Alpine.data('loginForm', () => ({
+                            email: '',
+                            password: '',
+                            showPassword: false,
+                            errorMessage: '',
+                            isLoading: false,
+
+                            async submit() {
+                                this.isLoading = true;
+                                this.errorMessage = '';
+                                try {
+                                    const response = await axios.post('/api/login', {
+                                        email: this.email,
+                                        password: this.password
+                                    });
+                                    
+                                    // Save the API token to localStorage
+                                    localStorage.setItem('access_token', response.data.access_token);
+                                    
+                                    // Redirect to the dashboard
+                                    window.location.href = '/dashboard';
+                                } catch (error) {
+                                    if (error.response && error.response.status === 401) {
+                                        this.errorMessage = 'Kredensial salah. Pastikan email dan password benar.';
+                                    } else {
+                                        this.errorMessage = 'Terjadi kesalahan pada server.';
+                                    }
+                                } finally {
+                                    this.isLoading = false;
+                                }
+                            }
+                        }));
+                    });
+                </script>
             </div>
         </div>
 

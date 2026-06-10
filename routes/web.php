@@ -11,5 +11,5 @@ Route::get('/login', function () {
 });
 
 Route::get('/dashboard', function () {
-    return "<h1>Dashboard Staff (Sedang dikerjakan oleh tim Frontend)</h1>";
+    return view('components.dashboard');
 });

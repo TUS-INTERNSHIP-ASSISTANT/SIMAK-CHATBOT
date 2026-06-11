@@ -7,6 +7,9 @@
     <title>Staff Portal</title>
 
     @vite(['resources/css/app.css','resources/js/app.js'])
+
+    {{-- CSRF token untuk request web route --}}
+    <meta name="csrf-token" content="{{ csrf_token() }}">
 </head>
 <body class="bg-[#F8F4F5]">
     <div class="min-h-screen flex">
@@ -133,23 +136,31 @@
                             errorMessage: '',
                             isLoading: false,
 
-                            async submit() {
+            async submit() {
                                 this.isLoading = true;
                                 this.errorMessage = '';
                                 try {
-                                    const response = await axios.post('/api/login', {
+                                    const response = await axios.post('/login', {
                                         email: this.email,
-                                        password: this.password
+                                        password: this.password,
+                                        // CSRF token dikirim otomatis oleh Axios karena
+                                        // axios sudah di-setup dengan header X-Requested-With
+                                        // dan Laravel menyediakan CSRF cookie untuk web routes
+                                        _token: document.querySelector('meta[name="csrf-token"]')?.content
                                     });
                                     
-                                    // Save the API token to localStorage
-                                    localStorage.setItem('access_token', response.data.access_token);
+                                    // Simpan token untuk API call di dalam dashboard
+                                    if (response.data.access_token) {
+                                        localStorage.setItem('access_token', response.data.access_token);
+                                    }
                                     
-                                    // Redirect to the dashboard
+                                    // Redirect ke dashboard (session sudah dibuat)
                                     window.location.href = '/dashboard';
                                 } catch (error) {
                                     if (error.response && error.response.status === 401) {
                                         this.errorMessage = 'Kredensial salah. Pastikan email dan password benar.';
+                                    } else if (error.response && error.response.status === 419) {
+                                        this.errorMessage = 'Sesi kedaluwarsa. Silakan muat ulang halaman.';
                                     } else {
                                         this.errorMessage = 'Terjadi kesalahan pada server.';
                                     }

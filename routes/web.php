@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\KnowledgeBaseController;
 
 /*
 |--------------------------------------------------------------------------
@@ -48,8 +49,14 @@ Route::middleware(['web', 'dashboard.auth'])
         Route::post('kelola-dokumen/{id}/restore', [DocumentController::class, 'restore'])
             ->name('kelola-dokumen.restore');
 
-        Route::get('/knowledge-base', fn () => view('dashboard.knowledge-base'))
+        Route::get('/knowledge-base', [KnowledgeBaseController::class, 'index'])
             ->name('knowledge-base');
+        Route::post('/knowledge-base/settings', [KnowledgeBaseController::class, 'saveSettings'])
+            ->name('knowledge-base.settings');
+        Route::post('/knowledge-base/sync', [KnowledgeBaseController::class, 'sync'])
+            ->name('knowledge-base.sync');
+        Route::post('/knowledge-base/query', [KnowledgeBaseController::class, 'query'])
+            ->name('knowledge-base.query');
 
         // ── Analitik ─────────────────────────────────────────────────────────
         Route::get('/statistik-chatbot', fn () => view('dashboard.statistik-chatbot'))
@@ -65,3 +72,7 @@ Route::middleware(['web', 'dashboard.auth'])
         Route::get('/manajemen-staff', fn () => view('dashboard.manajemen-staff'))
             ->name('manajemen-staff');
     });
+
+// ── Public Chatbot Query (Landing Page) ──────────────────────────────────────
+Route::post('/chatbot/query', [KnowledgeBaseController::class, 'query'])->name('chatbot.query');
+

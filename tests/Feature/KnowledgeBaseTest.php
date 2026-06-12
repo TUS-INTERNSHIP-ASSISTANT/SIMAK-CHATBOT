@@ -252,7 +252,7 @@ class KnowledgeBaseTest extends TestCase
 
         Http::assertSent(function ($request) {
             return str_contains($request->url(), '/chat/completions')
-                && data_get($request->data(), 'model') === 'llama3-8b-8192'
+                && data_get($request->data(), 'model') === 'llama-3.1-8b-instant'
                 && str_contains(data_get($request->data(), 'messages.0.content', ''), 'Aturan tambahan');
         });
     }

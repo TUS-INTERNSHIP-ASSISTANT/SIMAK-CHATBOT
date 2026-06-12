@@ -100,7 +100,7 @@
             <div class="min-w-0">
                 <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Model AI Aktif</p>
                 <p class="text-lg font-bold text-gray-900 mt-0.5 capitalize truncate" id="stat-active-model">
-                    {{ str_replace('groq-', 'Groq ', str_replace('gemini-', 'Gemini ', $model)) }}
+                    {{ $model === 'groq-llama3-8b' ? 'Groq Llama 3.1 8B' : ($model === 'groq-llama3-70b' ? 'Groq Llama 3.3 70B' : str_replace('gemini-', 'Gemini ', $model)) }}
                 </p>
                 <p class="text-xs text-gray-400 mt-0.5">Status: Terkoneksi</p>
             </div>
@@ -152,8 +152,8 @@
                         class="w-full text-sm rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-[#7A203A]/20 focus:border-[#7A203A] transition text-gray-700">
                         <option value="gemini-1.5-flash" {{ $model === 'gemini-1.5-flash' ? 'selected' : '' }}>Gemini 1.5 Flash (Direkomendasikan)</option>
                         <option value="gemini-1.5-pro" {{ $model === 'gemini-1.5-pro' ? 'selected' : '' }}>Gemini 1.5 Pro</option>
-                        <option value="groq-llama3-8b" {{ $model === 'groq-llama3-8b' ? 'selected' : '' }}>Groq / Llama 3 8B</option>
-                        <option value="groq-llama3-70b" {{ $model === 'groq-llama3-70b' ? 'selected' : '' }}>Groq / Llama 3 70B</option>
+                        <option value="groq-llama3-8b" {{ $model === 'groq-llama3-8b' ? 'selected' : '' }}>Groq / Llama 3.1 8B (Instant)</option>
+                        <option value="groq-llama3-70b" {{ $model === 'groq-llama3-70b' ? 'selected' : '' }}>Groq / Llama 3.3 70B (Versatile)</option>
                     </select>
                 </div>
 
@@ -453,7 +453,7 @@
                 showToast(data.message, 'success');
                 // Update active model stat
                 const selectedModel = document.getElementById('model').value;
-                let formattedModel = selectedModel.replace('gemini-', 'Gemini ').replace('groq-', 'Groq ').replace('llama3', 'Llama 3');
+                let formattedModel = selectedModel === 'groq-llama3-8b' ? 'Groq Llama 3.1 8B' : (selectedModel === 'groq-llama3-70b' ? 'Groq Llama 3.3 70B' : selectedModel.replace('gemini-', 'Gemini '));
                 document.getElementById('stat-active-model').textContent = formattedModel;
             } else {
                 showToast(data.message || 'Gagal menyimpan konfigurasi.', 'error');

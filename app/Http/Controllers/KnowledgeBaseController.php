@@ -400,6 +400,7 @@ class KnowledgeBaseController extends Controller
             ]);
 
         if (! $response->successful()) {
+            \Log::error("Groq API error on model {$selectedModel}: " . $response->status() . " - " . $response->body());
             return null;
         }
 
@@ -410,9 +411,9 @@ class KnowledgeBaseController extends Controller
     private function mapGroqModel(string $selectedModel): string
     {
         return match ($selectedModel) {
-            'groq-llama3-8b' => 'llama3-8b-8192',
-            'groq-llama3-70b' => 'llama3-70b-8192',
-            default => 'llama3-8b-8192',
+            'groq-llama3-8b' => 'llama-3.1-8b-instant',
+            'groq-llama3-70b' => 'llama-3.3-70b-versatile',
+            default => 'llama-3.1-8b-instant',
         };
     }
 
@@ -526,28 +527,10 @@ class KnowledgeBaseController extends Controller
             return $content;
         }
 
-        // Coba ekstrak teks asli dari PDF agar retrieval RAG berbasis konten dokumen nyata.
-        $canTryPdfExtraction = $doc->isFile()
-            && ! empty($doc->file_path)
-            && strtolower((string) $doc->type) === 'pdf';
-
-        if ($canTryPdfExtraction) {
-            try {
-                $disk = Storage::disk('local');
-                if ($disk->exists($doc->file_path)) {
-                    $absolutePath = $disk->path($doc->file_path);
-                    $pdfText = (new Parser())->parseFile($absolutePath)->getText();
-                    $pdfText = mb_convert_encoding((string) $pdfText, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1252');
-                    $pdfText = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $pdfText);
-                    $pdfText = trim((string) preg_replace(self::NORMALIZE_WHITESPACE_PATTERN, ' ', $pdfText));
-
-                    if (strlen($pdfText) >= 300) {
-                        return Str::limit($pdfText, 50000, '');
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Fallback ke placeholder jika parser gagal membaca dokumen.
-            }
+        // Coba ekstrak teks asli dari file dokumen (PDF, Word, Excel/CSV)
+        $extractedText = $this->extractDocumentText($doc);
+        if ($extractedText && strlen($extractedText) >= 100) {
+            return Str::limit($extractedText, 50000, '');
         }
 
         $title = $doc->title ?: 'Dokumen tanpa judul';
@@ -564,6 +547,80 @@ class KnowledgeBaseController extends Controller
             . "Dokumen ini sedang dipakai sebagai placeholder RAG untuk pengujian. "
             . "Gunakan pertanyaan yang merujuk pada judul, deskripsi, atau isi dokumen ini agar jawaban lebih spesifik. "
             . $topicHint;
+    }
+
+    /**
+     * Ekstrak teks asli dari file dokumen (PDF, DOCX, Excel/CSV).
+     */
+    private function extractDocumentText(Document $doc): ?string
+    {
+        if (! $doc->isFile() || empty($doc->file_path)) {
+            return null;
+        }
+
+        $disk = Storage::disk('local');
+        if (! $disk->exists($doc->file_path)) {
+            return null;
+        }
+
+        $absolutePath = $disk->path($doc->file_path);
+        $type = strtolower((string) $doc->type);
+
+        try {
+            if ($type === 'pdf') {
+                if (! class_exists(Parser::class)) {
+                    return null;
+                }
+                $pdfText = (new Parser())->parseFile($absolutePath)->getText();
+                $pdfText = mb_convert_encoding((string) $pdfText, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1252');
+                $pdfText = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $pdfText);
+                return trim((string) preg_replace(self::NORMALIZE_WHITESPACE_PATTERN, ' ', $pdfText));
+            }
+
+            if ($type === 'docx') {
+                $zip = new \ZipArchive();
+                if ($zip->open($absolutePath) === true) {
+                    $xml = $zip->getFromName('word/document.xml');
+                    $zip->close();
+                    if ($xml) {
+                        $text = strip_tags($xml);
+                        $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1252');
+                        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $text);
+                        return trim((string) preg_replace(self::NORMALIZE_WHITESPACE_PATTERN, ' ', $text));
+                    }
+                }
+            }
+
+            if ($type === 'excel') {
+                $ext = strtolower(pathinfo($absolutePath, PATHINFO_EXTENSION));
+                if ($ext === 'csv') {
+                    $csvText = '';
+                    if (($handle = fopen($absolutePath, 'r')) !== false) {
+                        while (($data = fgetcsv($handle, 1000, ',')) !== false) {
+                            $csvText .= implode(' ', $data) . "\n";
+                        }
+                        fclose($handle);
+                    }
+                    return trim($csvText);
+                } else {
+                    $zip = new \ZipArchive();
+                    if ($zip->open($absolutePath) === true) {
+                        $sharedStringsXml = $zip->getFromName('xl/sharedStrings.xml');
+                        $zip->close();
+                        if ($sharedStringsXml) {
+                            $text = strip_tags($sharedStringsXml);
+                            $text = mb_convert_encoding($text, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1252');
+                            $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', ' ', $text);
+                            return trim((string) preg_replace(self::NORMALIZE_WHITESPACE_PATTERN, ' ', $text));
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            \Log::error("Failed to extract text from document ID {$doc->id} ({$doc->type}): " . $e->getMessage());
+        }
+
+        return null;
     }
 
     private function generateFallbackAnswer(string $query, ?Document $matchedDoc): string

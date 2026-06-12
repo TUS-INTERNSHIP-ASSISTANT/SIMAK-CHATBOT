@@ -130,6 +130,18 @@
                     <span class="text-[10px] text-gray-400 block leading-normal">Instruksi utama yang mendikte nada, gaya bahasa, dan batasan chatbot dalam menjawab pertanyaan mahasiswa.</span>
                 </div>
 
+                    {{-- Knowledge Base Prompt --}}
+                    <div class="space-y-1.5">
+                        <label for="knowledge_base_prompt" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider">Knowledge Base Prompt (Tuning Domain Context)</label>
+                        <textarea
+                            name="knowledge_base_prompt"
+                            id="knowledge_base_prompt"
+                            rows="5"
+                            class="w-full text-sm rounded-xl border border-gray-200 bg-gray-50/30 px-4 py-3 outline-none focus:ring-2 focus:ring-[#7A203A]/20 focus:border-[#7A203A] transition resize-none leading-relaxed text-gray-700"
+                            placeholder="Tuning domain context beyond raw documents...">{{ $knowledgeBasePrompt }}</textarea>
+                        <span class="text-[10px] text-gray-400 block leading-normal">Tuning konteks domain untuk chatbot di luar dokumen mentah.</span>
+                    </div>
+
                 {{-- Model Selection --}}
                 <div class="space-y-1.5">
                     <label for="model" class="block text-xs font-semibold text-gray-600 uppercase tracking-wider">Model AI (LLM)</label>
@@ -394,7 +406,7 @@
         const messageContainer = document.getElementById('toast-message');
 
         toast.className = "mb-6 flex items-start gap-3 px-4 py-3 rounded-xl border text-sm font-medium transition-all duration-300";
-        
+
         if (type === 'success') {
             toast.classList.add('bg-emerald-50', 'border-emerald-200', 'text-emerald-700');
             iconContainer.innerHTML = `<svg class="w-5 h-5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`;
@@ -417,11 +429,11 @@
     // ── Save RAG settings via AJAX ──
     function saveRAGSettings(e) {
         e.preventDefault();
-        
+
         const form = document.getElementById('settings-form');
         const btn = document.getElementById('btn-save-settings');
         const originalText = btn.innerHTML;
-        
+
         btn.disabled = true;
         btn.innerHTML = `<span>Menyimpan...</span>`;
 
@@ -462,7 +474,7 @@
         const btn = document.getElementById('btn-sync-rag');
         const icon = document.getElementById('sync-icon');
         const text = document.getElementById('sync-text');
-        
+
         btn.disabled = true;
         icon.classList.add('animate-spin');
         text.textContent = "Sedang mensinkronisasi...";
@@ -473,7 +485,7 @@
             const badge = document.getElementById('doc-status-badge-' + id);
             const dot = document.getElementById('doc-status-dot-' + id);
             const statusTxt = document.getElementById('doc-status-text-' + id);
-            
+
             if (badge) {
                 badge.className = "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 ring-1 ring-amber-100";
                 dot.className = "w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse";
@@ -501,14 +513,14 @@
                 // Update stats
                 document.getElementById('stat-last-sync').textContent = data.last_sync;
                 document.getElementById('stat-total-chunks').textContent = data.total_chunks;
-                
+
                 // Update table row badges
                 docs.forEach(id => {
                     const badge = document.getElementById('doc-status-badge-' + id);
                     const dot = document.getElementById('doc-status-dot-' + id);
                     const statusTxt = document.getElementById('doc-status-text-' + id);
                     const dateCell = document.getElementById('doc-indexed-' + id);
-                    
+
                     if (badge) {
                         badge.className = "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
                         dot.className = "w-1.5 h-1.5 rounded-full bg-emerald-500";
@@ -541,7 +553,7 @@
             const badge = document.getElementById('doc-status-badge-' + doc.id);
             const dot = document.getElementById('doc-status-dot-' + doc.id);
             const statusTxt = document.getElementById('doc-status-text-' + doc.id);
-            
+
             if (badge) {
                 if (doc.indexed_at) {
                     badge.className = "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100";
@@ -565,14 +577,14 @@
 
     function submitPlaygroundQuery(e) {
         e.preventDefault();
-        
+
         const input = document.getElementById('playground-query-input');
         const query = input.value.trim();
         if (!query) return;
 
         const chatContainer = document.getElementById('chat-messages-container');
         const typingIndicator = document.getElementById('chat-typing-indicator');
-        
+
         // Disable input & button
         input.disabled = true;
         document.getElementById('btn-chat-send').disabled = true;
@@ -669,7 +681,7 @@
     }
 
     function escapeHTML(str) {
-        return str.replace(/[&<>'"]/g, 
+        return str.replace(/[&<>'"]/g,
             tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
         );
     }

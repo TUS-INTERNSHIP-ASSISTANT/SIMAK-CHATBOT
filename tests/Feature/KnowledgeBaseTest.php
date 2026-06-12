@@ -6,18 +6,22 @@ use App\Models\Document;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class KnowledgeBaseTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const DOC_TITLE_MAGANG = 'Panduan Magang Mandiri';
+    private const GROQ_ANSWER_PREFIX = 'Jawaban Groq:';
+
     protected User $user;
 
     protected function setUp(): void
     {
         parent::setUp();
-        
+
         $this->withoutVite();
 
         $this->user = User::factory()->create([
@@ -70,7 +74,7 @@ class KnowledgeBaseTest extends TestCase
         $response = $this->actingAs($this->user, 'web')->get('/dashboard/knowledge-base');
 
         $response->assertStatus(200);
-        
+
         // Cek apakah data di-pass ke view
         $response->assertViewHas('activeDocsCount', 2);
         $response->assertViewHas('totalChunks', 20);
@@ -87,6 +91,7 @@ class KnowledgeBaseTest extends TestCase
         $response = $this->actingAs($this->user, 'web')
             ->postJson(route('dashboard.knowledge-base.settings'), [
                 'system_prompt' => 'New custom system instructions.',
+                'knowledge_base_prompt' => 'Knowledge base tuning instructions.',
                 'model'         => 'gemini-1.5-pro',
                 'temperature'   => 0.7,
                 'chunk_size'    => 800,
@@ -101,6 +106,7 @@ class KnowledgeBaseTest extends TestCase
 
         // Cek database
         $this->assertEquals('New custom system instructions.', Setting::getVal('rag_system_prompt'));
+        $this->assertEquals('Knowledge base tuning instructions.', Setting::getVal('rag_knowledge_base_prompt'));
         $this->assertEquals('gemini-1.5-pro', Setting::getVal('rag_model'));
         $this->assertEquals(0.7, (float) Setting::getVal('rag_temperature'));
         $this->assertEquals(800, (int) Setting::getVal('rag_chunk_size'));
@@ -142,7 +148,7 @@ class KnowledgeBaseTest extends TestCase
     {
         // Buat dokumen aktif dengan content untuk dicocokkan
         Document::create([
-            'title' => 'Panduan Magang Mandiri',
+            'title' => self::DOC_TITLE_MAGANG,
             'type' => 'pdf',
             'status' => 'active',
             'uploaded_by' => $this->user->id,
@@ -160,7 +166,7 @@ class KnowledgeBaseTest extends TestCase
             'success' => true,
         ]);
         $response->assertJsonFragment([
-            'title' => 'Panduan Magang Mandiri',
+            'title' => self::DOC_TITLE_MAGANG,
         ]);
 
         // Tidak cocok
@@ -200,5 +206,171 @@ class KnowledgeBaseTest extends TestCase
             'title' => 'SOP Kerja Praktik Elektro',
         ]);
         $this->assertStringContainsString('lulus **90 SKS**', $response->json('answer'));
+    }
+
+    /**
+     * Test query menggunakan Groq API saat model Groq dipilih.
+     */
+    public function test_query_uses_groq_api_when_configured()
+    {
+        Setting::setVal('rag_model', 'groq-llama3-8b');
+        Setting::setVal('rag_temperature', 0.3);
+        Setting::setVal('rag_system_prompt', 'Anda asisten SIMAK.');
+
+        Document::create([
+            'title' => self::DOC_TITLE_MAGANG,
+            'type' => 'pdf',
+            'status' => 'active',
+            'uploaded_by' => $this->user->id,
+            'content' => 'Pendaftaran magang dilakukan melalui portal SIMAK dengan melampirkan CV dan transkrip.',
+        ]);
+
+        config()->set('services.groq.api_key', 'test-groq-key');
+
+        Http::fake([
+            'https://api.groq.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => 'Jawaban Groq: Pendaftaran magang dilakukan melalui portal SIMAK dengan CV dan transkrip.',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.query'), [
+                'query' => 'Bagaimana cara daftar magang?',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertStringContainsString(self::GROQ_ANSWER_PREFIX, $response->json('answer'));
+        $response->assertJsonFragment([
+            'title' => self::DOC_TITLE_MAGANG,
+        ]);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/chat/completions')
+                && data_get($request->data(), 'model') === 'llama3-8b-8192'
+                && str_contains(data_get($request->data(), 'messages.0.content', ''), 'Aturan tambahan');
+        });
+    }
+
+    /**
+     * Test retrieval memilih chunk yang spesifik pada dokumen panjang.
+     */
+    public function test_query_uses_specific_chunk_from_long_document()
+    {
+        Setting::setVal('rag_model', 'groq-llama3-8b');
+        Setting::setVal('rag_temperature', 0.3);
+        Setting::setVal('rag_chunk_size', 180);
+        Setting::setVal('rag_chunk_overlap', 0);
+
+        $longContent = str_repeat('Magang adalah program pembelajaran di industri. ', 12)
+            . 'Bagian penting berikutnya: konversi SKS dapat dipertimbangkan jika ada ketentuan resmi dari prodi. '
+            . str_repeat('Informasi tambahan tidak relevan. ', 8);
+
+        Document::create([
+            'title' => 'Panduan Magang Panjang',
+            'type' => 'pdf',
+            'status' => 'active',
+            'uploaded_by' => $this->user->id,
+            'content' => $longContent,
+        ]);
+
+        config()->set('services.groq.api_key', 'test-groq-key');
+
+        Http::fake([
+            'https://api.groq.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => 'Jawaban Groq: konversi SKS bisa dipertimbangkan sesuai ketentuan prodi.',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.query'), [
+                'query' => 'apakah magang bisa konversi sks?',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertStringContainsString(self::GROQ_ANSWER_PREFIX, $response->json('answer'));
+
+        Http::assertSent(function ($request) {
+            $userMessage = data_get($request->data(), 'messages.1.content', '');
+
+            return str_contains($request->url(), '/chat/completions')
+                && str_contains($userMessage, 'konversi SKS dapat dipertimbangkan');
+        });
+    }
+
+    /**
+     * Test Groq tetap dipanggil meski tidak ada dokumen aktif, selama prompt knowledge base tersedia.
+     */
+    public function test_query_uses_knowledge_base_prompt_even_without_documents()
+    {
+        Setting::setVal('rag_model', 'groq-llama3-8b');
+        Setting::setVal('rag_knowledge_base_prompt', 'SIMAK knowledge base prompt for domain guidance.');
+
+        config()->set('services.groq.api_key', 'test-groq-key');
+
+        Http::fake([
+            'https://api.groq.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => 'Jawaban Groq: gunakan pedoman knowledge base SIMAK.',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.query'), [
+                'query' => 'apa itu simak?',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertStringContainsString('Jawaban Groq:', $response->json('answer'));
+
+        Http::assertSent(function ($request) {
+            return str_contains(data_get($request->data(), 'messages.0.content', ''), 'SIMAK knowledge base prompt for domain guidance.')
+                && str_contains(data_get($request->data(), 'messages.1.content', ''), 'Pertanyaan pengguna: apa itu simak?');
+        });
+    }
+
+    /**
+     * Test query dengan singkatan "kp" tetap dapat menemukan dokumen kerja praktik.
+     */
+    public function test_query_with_kp_abbreviation_can_match_kerja_praktik_content()
+    {
+        Document::create([
+            'title' => 'Pedoman Kerja Praktik',
+            'type' => 'pdf',
+            'status' => 'active',
+            'uploaded_by' => $this->user->id,
+            'content' => 'Periode pendaftaran kerja praktik dibuka setiap awal semester ganjil melalui sistem SIMAK.',
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.query'), [
+                'query' => 'kapan periode pendaftaran kp?',
+            ]);
+
+        $response->assertStatus(200);
+        $response->assertJsonFragment([
+            'title' => 'Pedoman Kerja Praktik',
+        ]);
+
+        $this->assertStringNotContainsString(
+            'Maaf, saya tidak menemukan informasi yang relevan',
+            (string) $response->json('answer')
+        );
     }
 }

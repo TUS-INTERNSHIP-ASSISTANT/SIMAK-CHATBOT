@@ -119,6 +119,8 @@ class DocumentController extends Controller
 
         Document::create($data);
 
+        \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " mengunggah file " . $data['original_filename'], 'upload');
+
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
             ->with('success', 'Dokumen berhasil diupload.');
@@ -170,6 +172,8 @@ class DocumentController extends Controller
 
         $document->update($validated);
 
+        \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " memperbarui dokumen " . $document->title, 'update');
+
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
             ->with('success', 'Dokumen "' . $document->title . '" berhasil diperbarui.');
@@ -195,6 +199,8 @@ class DocumentController extends Controller
         $title = $document->title;
         $document->delete();
 
+        \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " menghapus dokumen " . $title, 'delete');
+
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
             ->with('success', 'Dokumen "' . $title . '" berhasil dihapus.');
@@ -208,6 +214,8 @@ class DocumentController extends Controller
     {
         $document = Document::withTrashed()->findOrFail($id);
         $document->restore();
+
+        \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " memulihkan dokumen " . $document->title, 'update');
 
         return redirect()
             ->route('dashboard.kelola-dokumen.index')

@@ -10,6 +10,7 @@ class ChatLog extends Model
         'user_id',
         'message',
         'response',
+        'normalized_message',
     ];
 
     public function user()

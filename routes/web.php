@@ -40,6 +40,9 @@ Route::middleware(['web', 'dashboard.auth'])
         // Halaman utama dashboard
         Route::get('/', [DashboardController::class, 'index'])->name('home');
 
+        // Fetch activity logs for real-time dashboard updates
+        Route::get('/activity-logs', [DashboardController::class, 'activityLogs'])->name('activity-logs');
+
         // ── Dokumen ──────────────────────────────────────────────────────────
         Route::resource('kelola-dokumen', DocumentController::class)
             ->except(['create', 'edit'])
@@ -62,7 +65,7 @@ Route::middleware(['web', 'dashboard.auth'])
         Route::get('/statistik-chatbot', fn () => view('dashboard.statistik-chatbot'))
             ->name('statistik-chatbot');
 
-        Route::get('/pertanyaan-populer', fn () => view('dashboard.pertanyaan-populer'))
+        Route::get('/pertanyaan-populer', [DashboardController::class, 'popularQuestions'])
             ->name('pertanyaan-populer');
 
         Route::get('/statistik-pengunjung', fn () => view('dashboard.statistik-pengunjung'))

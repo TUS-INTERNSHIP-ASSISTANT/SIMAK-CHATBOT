@@ -24,6 +24,9 @@ class AuthController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::guard('web')->user();
 
+        // Log login activity
+        \App\Models\ActivityLog::log("Staff {$user->name} berhasil login", 'login', $user->id);
+
         // Buat Sanctum API token (untuk kebutuhan API call di dalam dashboard)
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -66,6 +69,9 @@ class AuthController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::guard('web')->user();
 
+        // Log web login activity
+        \App\Models\ActivityLog::log("Staff {$user->name} berhasil login", 'login', $user->id);
+
         // Buat Sanctum token untuk API call di dalam dashboard
         $token = $user->createToken('dashboard_token')->plainTextToken;
 
@@ -81,6 +87,8 @@ class AuthController extends Controller
     {
         // Hapus Sanctum token saja (untuk API client)
         if ($request->user()) {
+            $user = $request->user();
+            \App\Models\ActivityLog::log("Staff {$user->name} logout", 'logout', $user->id);
             $request->user()->currentAccessToken()->delete();
         }
 
@@ -97,6 +105,7 @@ class AuthController extends Controller
     {
         // Hapus semua Sanctum token milik user
         if ($user = Auth::guard('web')->user()) {
+            \App\Models\ActivityLog::log("Staff {$user->name} logout", 'logout', $user->id);
             $user->tokens()->delete();
         }
 

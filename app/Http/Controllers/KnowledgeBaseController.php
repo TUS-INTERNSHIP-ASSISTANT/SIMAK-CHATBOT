@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Document;
 use App\Models\Setting;
+use App\Models\ChatLog;
 use Illuminate\Support\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
@@ -63,9 +64,9 @@ class KnowledgeBaseController extends Controller
         $validated = $request->validate([
             'system_prompt' => ['required', 'string', 'max:5000'],
             'knowledge_base_prompt' => ['required', 'string', 'max:5000'],
-            'model'         => ['required', 'string', 'in:gemini-1.5-flash,gemini-1.5-pro,groq-llama3-8b,groq-llama3-70b'],
-            'temperature'   => ['required', 'numeric', 'between:0,1'],
-            'chunk_size'    => ['required', 'integer', 'between:500,1000'],
+            'model' => ['required', 'string', 'in:gemini-1.5-flash,gemini-1.5-pro,groq-llama3-8b,groq-llama3-70b'],
+            'temperature' => ['required', 'numeric', 'between:0,1'],
+            'chunk_size' => ['required', 'integer', 'between:500,1000'],
             'chunk_overlap' => ['required', 'integer', 'min:0'],
         ]);
 
@@ -75,6 +76,8 @@ class KnowledgeBaseController extends Controller
         Setting::setVal('rag_temperature', $validated['temperature']);
         Setting::setVal('rag_chunk_size', $validated['chunk_size']);
         Setting::setVal('rag_chunk_overlap', $validated['chunk_overlap']);
+
+        \App\Models\ActivityLog::log("Staff " . (auth()->user()->name ?? 'Admin') . " memperbarui konfigurasi RAG", 'update');
 
         if ($request->wantsJson()) {
             return response()->json([
@@ -108,11 +111,13 @@ class KnowledgeBaseController extends Controller
         /** @var Document $doc */
         foreach ($activeDocs as $doc) {
             $doc->update([
-                'indexed_at'  => $now,
+                'indexed_at' => $now,
                 'chunk_count' => $this->estimateChunkCount($doc),
-                'content'     => $this->buildPlaceholderContent($doc),
+                'content' => $this->buildPlaceholderContent($doc),
             ]);
         }
+
+        \App\Models\ActivityLog::log("Staff " . (auth()->user()->name ?? 'Admin') . " menyinkronkan basis pengetahuan", 'sync');
 
         return response()->json([
             'success' => true,
@@ -148,8 +153,8 @@ class KnowledgeBaseController extends Controller
         if ($this->isGeneralConversation($query)) {
             return response()->json([
                 'success' => true,
-                'answer'  => $this->buildGeneralConversationAnswer($query),
-                'source'  => null,
+                'answer' => $this->buildGeneralConversationAnswer($query),
+                'source' => null,
             ]);
         }
 
@@ -167,18 +172,48 @@ class KnowledgeBaseController extends Controller
         }
 
         // Fallback lokal tetap dipertahankan jika model non-Groq atau API gagal.
-        if (! $answer) {
+        if (!$answer) {
             $answer = $this->generateFallbackAnswer($query, $topDoc);
         }
 
+        // Log the query to chat_logs
+        $normalized = $this->normalizeQuestion($query);
+        ChatLog::create([
+            'user_id' => auth()->id(),
+            'message' => $query,
+            'response' => $answer ?? '',
+            'normalized_message' => $normalized,
+        ]);
+
         return response()->json([
             'success' => true,
-            'answer'  => $answer,
-            'source'  => $topDoc ? [
+            'answer' => $answer,
+            'source' => $topDoc ? [
                 'title' => $topDoc->title,
-                'type'  => $topDoc->type,
+                'type' => $topDoc->type,
             ] : null,
         ]);
+    }
+
+    /**
+     * Normalize query inputs to classify similar questions deterministically.
+     */
+    public function normalizeQuestion(string $text): string
+    {
+        $text = strtolower($text);
+        $text = preg_replace('/[^\w\s]/u', '', $text);
+        $words = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+        $stopWords = [
+            'apa', 'apakah', 'saja', 'bagaimana', 'siapa', 'kapan', 'dimana', 'di', 'mana', 
+            'kah', 'ini', 'itu', 'adalah', 'yang', 'dan', 'ke', 'untuk', 'pada', 'tentang', 
+            'dengan', 'sih', 'dong', 'ya', 'kok', 'tah', 'ada'
+        ];
+        $filtered = array_filter($words, function ($word) use ($stopWords) {
+            return !in_array($word, $stopWords);
+        });
+        sort($filtered);
+        $result = implode(' ', $filtered);
+        return empty($result) ? trim($text) : $result;
     }
 
     /**
@@ -214,7 +249,7 @@ class KnowledgeBaseController extends Controller
             return [];
         }
 
-        usort($scored, fn ($a, $b) => $b['score'] <=> $a['score']);
+        usort($scored, fn($a, $b) => $b['score'] <=> $a['score']);
 
         return array_slice($scored, 0, $limit);
     }
@@ -258,7 +293,7 @@ class KnowledgeBaseController extends Controller
         }
 
         foreach ($words as $word) {
-            if (! $word || (strlen($word) < 3 && ! in_array($word, self::SHORT_DOMAIN_TOKENS, true))) {
+            if (!$word || (strlen($word) < 3 && !in_array($word, self::SHORT_DOMAIN_TOKENS, true))) {
                 continue;
             }
 
@@ -268,7 +303,7 @@ class KnowledgeBaseController extends Controller
         }
 
         $matchedTokens = $this->countMatchedTokens($words, $chunkLower, $chunkLower, $chunkLower);
-        if ($matchedTokens < 2 && ! str_contains($chunkLower, $queryLower)) {
+        if ($matchedTokens < 2 && !str_contains($chunkLower, $queryLower)) {
             return 0;
         }
 
@@ -295,7 +330,7 @@ class KnowledgeBaseController extends Controller
 
         $words = preg_split(self::NORMALIZE_WHITESPACE_PATTERN, preg_replace('/[^a-z0-9\s]/', ' ', $queryLower));
         foreach ($words as $word) {
-            if (! $word || (strlen($word) < 3 && ! in_array($word, self::SHORT_DOMAIN_TOKENS, true))) {
+            if (!$word || (strlen($word) < 3 && !in_array($word, self::SHORT_DOMAIN_TOKENS, true))) {
                 continue;
             }
 
@@ -304,7 +339,7 @@ class KnowledgeBaseController extends Controller
 
         $matchedTokens = $this->countMatchedTokens($words, $title, $description, $content);
 
-        if ($matchedTokens < 2 && ! str_contains($content, $queryLower)) {
+        if ($matchedTokens < 2 && !str_contains($content, $queryLower)) {
             return 0;
         }
 
@@ -336,7 +371,7 @@ class KnowledgeBaseController extends Controller
 
         $filteredWords = [];
         foreach ($words as $word) {
-            if (! $word) {
+            if (!$word) {
                 continue;
             }
 
@@ -399,7 +434,7 @@ class KnowledgeBaseController extends Controller
                 ],
             ]);
 
-        if (! $response->successful()) {
+        if (!$response->successful()) {
             \Log::error("Groq API error on model {$selectedModel}: " . $response->status() . " - " . $response->body());
             return null;
         }
@@ -520,8 +555,8 @@ class KnowledgeBaseController extends Controller
     {
         $content = (string) ($doc->content ?? '');
         $hasRealContent = $content !== ''
-            && ! str_starts_with($content, 'Dokumen Panduan RAG SIMAK:')
-            && ! str_starts_with($content, 'Ringkasan dokumen:');
+            && !str_starts_with($content, 'Dokumen Panduan RAG SIMAK:')
+            && !str_starts_with($content, 'Ringkasan dokumen:');
 
         if ($hasRealContent) {
             return $content;
@@ -554,12 +589,12 @@ class KnowledgeBaseController extends Controller
      */
     private function extractDocumentText(Document $doc): ?string
     {
-        if (! $doc->isFile() || empty($doc->file_path)) {
+        if (!$doc->isFile() || empty($doc->file_path)) {
             return null;
         }
 
         $disk = Storage::disk('local');
-        if (! $disk->exists($doc->file_path)) {
+        if (!$disk->exists($doc->file_path)) {
             return null;
         }
 
@@ -568,7 +603,7 @@ class KnowledgeBaseController extends Controller
 
         try {
             if ($type === 'pdf') {
-                if (! class_exists(Parser::class)) {
+                if (!class_exists(Parser::class)) {
                     return null;
                 }
                 $pdfText = (new Parser())->parseFile($absolutePath)->getText();
@@ -627,7 +662,7 @@ class KnowledgeBaseController extends Controller
     {
         $answer = 'Maaf, saya tidak menemukan informasi yang relevan mengenai pertanyaan tersebut dalam basis pengetahuan aktif SIMAK. Harap pastikan dokumen panduan terkait sudah diunggah dan diatur berstatus Aktif di dashboard Kelola Dokumen.';
 
-        if (! $matchedDoc) {
+        if (!$matchedDoc) {
             return $answer;
         }
 

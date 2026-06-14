@@ -339,16 +339,7 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-50">
-                                @php
-                                    $faqData = [
-                                        ['no' => 1, 'question' => 'Apa syarat Kerja Praktik?', 'count' => 140],
-                                        ['no' => 2, 'question' => 'Berapa minimal SKS untuk magang?', 'count' => 55],
-                                        ['no' => 3, 'question' => 'Bagaimana cara daftar KP online?', 'count' => 48],
-                                        ['no' => 4, 'question' => 'Kapan batas pengumpulan laporan?', 'count' => 32],
-                                        ['no' => 5, 'question' => 'Siapa dosen pembimbing saya?', 'count' => 21],
-                                    ];
-                                @endphp
-                                @foreach ($faqData as $item)
+                                @forelse ($faqData as $item)
                                     <tr class="hover:bg-gray-50/60 transition-colors group">
                                         <td class="px-6 py-3.5 text-gray-400 text-xs font-medium">{{ $item['no'] }}</td>
                                         <td class="px-4 py-3.5 text-gray-700 font-medium">{{ $item['question'] }}</td>
@@ -359,7 +350,13 @@
                                             </span>
                                         </td>
                                     </tr>
-                                @endforeach
+                                @empty
+                                    <tr>
+                                        <td colspan="3" class="px-6 py-8 text-center text-gray-400 text-sm">
+                                            Belum ada pertanyaan populer.
+                                        </td>
+                                    </tr>
+                                @endforelse
                             </tbody>
                         </table>
                     </div>
@@ -374,34 +371,24 @@
                         </div>
                     </div>
                     <div class="divide-y divide-gray-50">
-                        @php
-                            $activityLog = [
-                                ['time' => '10 Jun 2026, 09:14', 'activity' => 'Admin mengunggah file SOP KP.pdf', 'type' => 'upload'],
-                                ['time' => '10 Jun 2026, 08:30', 'activity' => 'Knowledge Base diperbarui', 'type' => 'update'],
-                                ['time' => '09 Jun 2026, 15:22', 'activity' => 'Admin menghapus dokumen lama', 'type' => 'delete'],
-                                ['time' => '09 Jun 2026, 11:05', 'activity' => 'Staff baru berhasil login', 'type' => 'login'],
-                                ['time' => '08 Jun 2026, 14:48', 'activity' => 'Statistik chatbot diperbarui otomatis', 'type' => 'update'],
-                            ];
-                            $typeConfig = [
-                                'upload' => ['bg' => 'bg-blue-100', 'text' => 'text-blue-600', 'icon' => '↑'],
-                                'update' => ['bg' => 'bg-amber-100', 'text' => 'text-amber-600', 'icon' => '✎'],
-                                'delete' => ['bg' => 'bg-red-100', 'text' => 'text-red-500', 'icon' => '✕'],
-                                'login' => ['bg' => 'bg-green-100', 'text' => 'text-green-600', 'icon' => '→'],
-                            ];
-                        @endphp
-                        @foreach ($activityLog as $log)
-                            @php $cfg = $typeConfig[$log['type']] ?? $typeConfig['update']; @endphp
-                            <div class="flex items-start gap-3 px-6 py-3.5 hover:bg-gray-50/60 transition-colors">
+                        <template x-for="log in activityLogs" :key="log.id || log.activity + log.time">
+                            <div class="flex items-start gap-3 px-6 py-3.5 hover:bg-gray-50/60 transition-colors"
+                                 x-transition:enter="transition ease-out duration-300"
+                                 x-transition:enter-start="opacity-0 -translate-y-2"
+                                 x-transition:enter-end="opacity-100 translate-y-0">
                                 <span
-                                    class="w-6 h-6 rounded-full {{ $cfg['bg'] }} {{ $cfg['text'] }} flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
-                                    {{ $cfg['icon'] }}
+                                    :class="((typeConfig[log.type] || typeConfig['update']).bg) + ' w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5'"
+                                    x-text="(typeConfig[log.type] || typeConfig['update']).icon">
                                 </span>
                                 <div class="min-w-0">
-                                    <p class="text-sm text-gray-700 font-medium leading-snug">{{ $log['activity'] }}</p>
-                                    <p class="text-xs text-gray-400 mt-0.5">{{ $log['time'] }}</p>
+                                    <p class="text-sm text-gray-700 font-medium leading-snug" x-text="log.activity"></p>
+                                    <p class="text-xs text-gray-400 mt-0.5" x-text="log.time"></p>
                                 </div>
                             </div>
-                        @endforeach
+                        </template>
+                        <div x-show="activityLogs.length === 0" class="px-6 py-8 text-center text-gray-400 text-sm">
+                            Belum ada log aktivitas.
+                        </div>
                     </div>
                 </div>
 
@@ -415,6 +402,15 @@
                 sidebarOpen: false,
                 greeting: '',
                 currentDate: '',
+                activityLogs: @json($initialLogs),
+                typeConfig: {
+                    upload: { bg: 'bg-blue-50 text-blue-600 border border-blue-100', icon: '↑' },
+                    update: { bg: 'bg-amber-50 text-amber-600 border border-amber-100', icon: '✎' },
+                    delete: { bg: 'bg-red-50 text-red-500 border border-red-100', icon: '✕' },
+                    login: { bg: 'bg-green-50 text-green-600 border border-green-100', icon: '→' },
+                    logout: { bg: 'bg-gray-50 text-gray-600 border border-gray-100', icon: '←' },
+                    sync: { bg: 'bg-indigo-50 text-indigo-600 border border-indigo-100', icon: '↻' }
+                },
 
                 init() {
                     this.setGreetingAndDate();
@@ -422,6 +418,20 @@
                     const token = localStorage.getItem('access_token');
                     if (token) {
                         window.axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+                    }
+
+                    // Poll activity logs every 5 seconds
+                    setInterval(() => {
+                        this.fetchActivityLogs();
+                    }, 5000);
+                },
+
+                async fetchActivityLogs() {
+                    try {
+                        const response = await window.axios.get('{{ route("dashboard.activity-logs") }}');
+                        this.activityLogs = response.data;
+                    } catch (error) {
+                        console.error('Failed to fetch activity logs:', error);
                     }
                 },
 

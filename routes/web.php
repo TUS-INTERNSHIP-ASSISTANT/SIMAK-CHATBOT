@@ -74,11 +74,9 @@ Route::middleware(['web', 'dashboard.auth'])
         // ── Akun ─────────────────────────────────────────────────────────────
         Route::get('/manajemen-staff', fn () => view('dashboard.manajemen-staff'))
             ->name('manajemen-staff');
+        Route::post('/manajemen-staff', [DashboardController::class, 'updateStaff'])
+            ->name('manajemen-staff.update');
     });
 
 // ── Public Chatbot Query (Landing Page) ──────────────────────────────────────
 Route::post('/chatbot/query', [KnowledgeBaseController::class, 'query'])->name('chatbot.query');
-
-Route::get('/review-manajemen-staff', function () {
-    return view('review.app.manajemen-staff');
-});

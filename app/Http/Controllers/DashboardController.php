@@ -144,4 +144,47 @@ class DashboardController extends Controller
 
         return view('dashboard.pertanyaan-populer', compact('popularQuestions', 'showAll'));
     }
+
+    /**
+     * POST /dashboard/manajemen-staff
+     * Update the logged-in staff user's name and/or password.
+     */
+    public function updateStaff(Request $request)
+    {
+        /** @var \App\Models\User $user */
+        $user = auth()->user();
+
+        $rules = [
+            'nama_lengkap' => ['required', 'string', 'max:255'],
+        ];
+
+        // If password is provided, validate it
+        if ($request->filled('password')) {
+            $rules['password'] = ['required', 'string', 'min:8', 'confirmed'];
+        }
+
+        $validated = $request->validate($rules);
+
+        $oldName = $user->name;
+        $user->name = $validated['nama_lengkap'];
+
+        $passwordChanged = false;
+        if ($request->filled('password')) {
+            $user->password = \Illuminate\Support\Facades\Hash::make($validated['password']);
+            $passwordChanged = true;
+        }
+
+        $user->save();
+
+        // Log the activity
+        if ($oldName !== $user->name && $passwordChanged) {
+            \App\Models\ActivityLog::log("Staff {$oldName} memperbarui nama menjadi {$user->name} dan mengganti password", 'update', $user->id);
+        } elseif ($oldName !== $user->name) {
+            \App\Models\ActivityLog::log("Staff {$oldName} memperbarui nama menjadi {$user->name}", 'update', $user->id);
+        } elseif ($passwordChanged) {
+            \App\Models\ActivityLog::log("Staff {$user->name} memperbarui password", 'update', $user->id);
+        }
+
+        return redirect()->back()->with('success', 'Profil staff berhasil diperbarui.');
+    }
 }

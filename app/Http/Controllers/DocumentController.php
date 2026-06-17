@@ -13,8 +13,8 @@ class DocumentController extends Controller
      * Peta tipe dokumen → MIME types yang diizinkan.
      */
     private const TYPE_MIME_MAP = [
-        'pdf'   => ['application/pdf'],
-        'docx'  => [
+        'pdf' => ['application/pdf'],
+        'docx' => [
             'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         ],
@@ -30,8 +30,8 @@ class DocumentController extends Controller
      * Peta tipe dokumen → ekstensi yang diizinkan.
      */
     private const TYPE_EXT_MAP = [
-        'pdf'   => ['pdf'],
-        'docx'  => ['doc', 'docx'],
+        'pdf' => ['pdf'],
+        'docx' => ['doc', 'docx'],
         'excel' => ['xls', 'xlsx', 'csv'],
     ];
 
@@ -72,10 +72,10 @@ class DocumentController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'title'       => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'type'        => ['required', 'in:pdf,docx,excel'],
-            'file'        => [
+            'type' => ['required', 'in:pdf,docx,excel'],
+            'file' => [
                 'required',
                 'file',
                 'max:10240',                              // 10 MB
@@ -86,11 +86,11 @@ class DocumentController extends Controller
         $file = $request->file('file');
 
         // ── Validasi cross-check: ekstensi file vs tipe yang dipilih ─────────
-        $ext       = strtolower($file->getClientOriginalExtension());
-        $type      = $validated['type'];
+        $ext = strtolower($file->getClientOriginalExtension());
+        $type = $validated['type'];
         $allowedExts = self::TYPE_EXT_MAP[$type] ?? [];
 
-        if (! in_array($ext, $allowedExts)) {
+        if (!in_array($ext, $allowedExts)) {
             return back()
                 ->withInput()
                 ->withErrors([
@@ -106,15 +106,15 @@ class DocumentController extends Controller
         $path = $file->store('documents', 'local');
 
         $data = [
-            'title'             => $validated['title'],
-            'description'       => $validated['description'] ?? null,
-            'type'              => $type,
-            'file_path'         => $path,
+            'title' => $validated['title'],
+            'description' => $validated['description'] ?? null,
+            'type' => $type,
+            'file_path' => $path,
             'original_filename' => $file->getClientOriginalName(),
-            'file_size'         => $file->getSize(),
-            'mime_type'         => $file->getMimeType(),
-            'status'            => 'active',
-            'uploaded_by'       => Auth::id(),
+            'file_size' => $file->getSize(),
+            'mime_type' => $file->getMimeType(),
+            'status' => 'active',
+            'uploaded_by' => Auth::id(),
         ];
 
         Document::create($data);
@@ -141,7 +141,7 @@ class DocumentController extends Controller
 
         try {
             // Pastikan file benar-benar ada di storage
-            if (! Storage::disk('local')->exists($document->file_path)) {
+            if (!Storage::disk('local')->exists($document->file_path)) {
                 return redirect()
                     ->route('dashboard.kelola-dokumen.index')
                     ->with('error', 'File tidak ditemukan di server. Mungkin sudah dihapus.');
@@ -165,9 +165,9 @@ class DocumentController extends Controller
     public function update(Request $request, Document $document)
     {
         $validated = $request->validate([
-            'title'       => ['required', 'string', 'max:255'],
+            'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'status'      => ['required', 'in:active,inactive'],
+            'status' => ['required', 'in:active,inactive'],
         ]);
 
         $document->update($validated);
@@ -186,7 +186,7 @@ class DocumentController extends Controller
     public function destroy(Document $document)
     {
         // Hapus file fisik dari storage sebelum soft-delete
-        if (! empty($document->file_path)) {
+        if (!empty($document->file_path)) {
             try {
                 if (Storage::disk('local')->exists($document->file_path)) {
                     Storage::disk('local')->delete($document->file_path);

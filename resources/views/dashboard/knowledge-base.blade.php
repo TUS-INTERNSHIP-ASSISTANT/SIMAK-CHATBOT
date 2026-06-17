@@ -669,8 +669,8 @@
                     <img src="{{ asset('assets/images/robot-preview.png') }}" alt="Bot" class="w-4.5 h-4.5 object-contain">
                 </div>
                 <div class="max-w-[85%]">
-                    <div class="rounded-2xl rounded-tl-sm bg-white border border-gray-100 px-4 py-3 shadow-sm">
-                        <p class="text-xs sm:text-sm text-gray-700 leading-relaxed">${formatMarkdown(text)}</p>
+                    <div class="rounded-2xl rounded-tl-sm bg-white border border-gray-100 px-4 py-3 shadow-sm text-xs sm:text-sm text-gray-700 leading-relaxed">
+                        <div class="space-y-2 select-text">${formatMarkdown(text)}</div>
                         ${sourceHtml}
                     </div>
                     <p class="mt-1 text-[9px] text-gray-400">SIMAK • ${timeStr}</p>
@@ -687,8 +687,100 @@
     }
 
     function formatMarkdown(text) {
-        // Formatter sederhana untuk cetak tebal **text**
-        return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        if (!text) return '';
+
+        // First, escape HTML characters to prevent XSS
+        let escaped = escapeHTML(text);
+
+        // Split text by lines to handle block elements (headings, lists, paragraphs)
+        const lines = escaped.split('\n');
+        let htmlResult = [];
+        let currentListType = null; // 'ul', 'ol', or null
+
+        function closeList() {
+            if (currentListType) {
+                htmlResult.push(`</${currentListType}>`);
+                currentListType = null;
+            }
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            let trimmed = line.trim();
+
+            // 1. Heading Markdown (e.g. ### Heading)
+            const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+            if (headingMatch) {
+                closeList();
+                const level = headingMatch[1].length;
+                const headingText = headingMatch[2];
+                const formattedText = formatInlineMarkdown(headingText);
+                
+                let headingClass = 'font-bold text-gray-900 my-2 block';
+                if (level === 1) headingClass += ' text-lg text-[#7A203A]';
+                else if (level === 2) headingClass += ' text-md text-[#7A203A]';
+                else headingClass += ' text-sm';
+
+                htmlResult.push(`<h${level} class="${headingClass}">${formattedText}</h${level}>`);
+                continue;
+            }
+
+            // 2. Unordered List Markdown (e.g. - item or * item)
+            const ulMatch = line.match(/^(\s*)[-*]\s+(.+)$/);
+            if (ulMatch) {
+                const listContent = ulMatch[2];
+                const formattedContent = formatInlineMarkdown(listContent);
+                if (currentListType !== 'ul') {
+                    closeList();
+                    htmlResult.push('<ul class="list-disc pl-5 my-2 space-y-1">');
+                    currentListType = 'ul';
+                }
+                htmlResult.push(`<li class="text-xs sm:text-sm text-gray-700 leading-relaxed">${formattedContent}</li>`);
+                continue;
+            }
+
+            // 3. Ordered List Markdown (e.g. 1. item)
+            const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+            if (olMatch) {
+                const listContent = olMatch[2];
+                const formattedContent = formatInlineMarkdown(listContent);
+                if (currentListType !== 'ol') {
+                    closeList();
+                    htmlResult.push('<ol class="list-decimal pl-5 my-2 space-y-1">');
+                    currentListType = 'ol';
+                }
+                htmlResult.push(`<li class="text-xs sm:text-sm text-gray-700 leading-relaxed">${formattedContent}</li>`);
+                continue;
+            }
+
+            // 4. Empty lines
+            if (trimmed === '') {
+                if (currentListType) {
+                    continue;
+                }
+                closeList();
+                htmlResult.push('<div class="h-2"></div>');
+                continue;
+            }
+
+            // 5. Normal text line (or continuation of a paragraph)
+            closeList();
+            const formattedLine = formatInlineMarkdown(line);
+            htmlResult.push(`<p class="text-xs sm:text-sm text-gray-700 leading-relaxed mb-2">${formattedLine}</p>`);
+        }
+
+        closeList();
+
+        return htmlResult.join('\n');
+    }
+
+    function formatInlineMarkdown(text) {
+        // Bold: **text**
+        let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900">$1</strong>');
+        // Italic: *text* or _text_
+        formatted = formatted.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
+        formatted = formatted.replace(/_(.*?)_/g, '<em class="italic">$1</em>');
+        return formatted;
     }
 </script>
 @endpush

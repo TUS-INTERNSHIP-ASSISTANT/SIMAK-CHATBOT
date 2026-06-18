@@ -101,19 +101,20 @@ class KnowledgeBaseController extends Controller
         if ($activeDocs->isEmpty()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Tidak ada dokumen aktif untuk disinkronisasi. Silakan aktifkan dokumen terlebih dahulu di Kelola Dokumen.',
+                'message' => 'Tidak ada dokumen aktif untuk disinkronisasi.',
             ], 422);
         }
 
         $now = now();
 
-        // Simulasi pengindeksan: update chunk_count dan indexed_at secara acak
-        /** @var Document $doc */
         foreach ($activeDocs as $doc) {
+            $extractedText = $doc->extracted_text ?? $this->extractDocumentText($doc);
+
+            // Simpan teks asli ke kolom content
             $doc->update([
-                'indexed_at' => $now,
-                'chunk_count' => $this->estimateChunkCount($doc),
-                'content' => $this->buildPlaceholderContent($doc),
+                'content'       => $extractedText ?: $this->buildFallbackContent($doc),
+                'indexed_at'    => $now,
+                'chunk_count'   => $this->estimateChunkCount($doc),
             ]);
         }
 
@@ -121,8 +122,8 @@ class KnowledgeBaseController extends Controller
 
         return response()->json([
             'success' => true,
-            'message' => 'Sinkronisasi selesai! ' . $activeDocs->count() . ' dokumen berhasil diindeks.',
-            'last_sync' => now()->format('d M Y, H:i'),
+            'message' => 'Sinkronisasi berhasil! ' . $activeDocs->count() . ' dokumen diindeks ulang.',
+            'last_sync' => $now->format('d M Y, H:i'),
             'total_chunks' => Document::active()->sum('chunk_count'),
         ]);
     }
@@ -204,8 +205,8 @@ class KnowledgeBaseController extends Controller
         $text = preg_replace('/[^\w\s]/u', '', $text);
         $words = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
         $stopWords = [
-            'apa', 'apakah', 'saja', 'bagaimana', 'siapa', 'kapan', 'dimana', 'di', 'mana', 
-            'kah', 'ini', 'itu', 'adalah', 'yang', 'dan', 'ke', 'untuk', 'pada', 'tentang', 
+            'apa', 'apakah', 'saja', 'bagaimana', 'siapa', 'kapan', 'dimana', 'di', 'mana',
+            'kah', 'ini', 'itu', 'adalah', 'yang', 'dan', 'ke', 'untuk', 'pada', 'tentang',
             'dengan', 'sih', 'dong', 'ya', 'kok', 'tah', 'ada'
         ];
         $filtered = array_filter($words, function ($word) use ($stopWords) {
@@ -533,6 +534,27 @@ class KnowledgeBaseController extends Controller
             return 'Saya SIMAK, asisten chatbot untuk membantu pertanyaan seputar Magang dan Kerja Praktik.';
         }
 
+        if (str_contains($queryLower, 'saya mau template laporan kp') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'laporan kerja praktik')) {
+            return 'berikut adalah template laporan kerja praktik https://telkomuniversityofficial-my.sharepoint.com/:w:/g/personal/akademiksby_telkomuniversity_ac_id/ETugZTCtDo9NskNSKVZ2U-8BP7rtdbS5HQmOV2xE69FIyg?e=73Zmfq';
+        }
+
+        if (str_contains($queryLower, 'saya mau template proposal kp') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'proposal kerja praktik')) {
+            return 'berikut adalah template proposal kerja praktik https://telkomuniversityofficial-my.sharepoint.com/:w:/g/personal/akademiksby_telkomuniversity_ac_id/EeO5Q_3F5c9Kqt8xDtKwDqUB2JWzm3w48HkRLJpw5ZB8Bw?e=doIM44';
+        }
+
+        if (str_contains($queryLower, 'saya mau buku pedoman kp') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'buku pedoman kerja praktik')) {
+            return 'berikut adalah buku pedoman kerja praktik, buku pedoman bisa dilihat secara langsung melalui link berikut: https://linktr.ee/laa.upps.sby';
+        }
+
+        if (str_contains($queryLower, 'saya mau mengajukan permohonan kp') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'permohonan kerja praktik')) {
+            return 'berikut adalah link untuk mengajukan permohonan kerja praktik, silakan klik link berikut:https://forms.office.com/r/fDLRurDYL5';
+        }
+
+        if (str_contains($queryLower, 'bagaimana cara mengajukan surat pengantar kp') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'cara mengajukan surat pengantar kerja praktik')) {
+            return 'berikut cara bagaimana cara untuk mengajukan surat pengantar kerja praktik, silakan klik link berikut:https://telkomuniversityofficial-my.sharepoint.com/:b:/g/personal/akademiksby_telkomuniversity_ac_id/EWLuBIrAWOJFnQ-Gkx4MdiMB7dpv15Ld32X68pJjbm2Vkg?e=7sxZDv';
+        }
+
+
         if (str_contains($queryLower, 'terima kasih') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'thanks')) {
             return 'Sama-sama. Kalau ada pertanyaan seputar Magang atau Kerja Praktik, silakan lanjutkan.';
         }
@@ -582,6 +604,15 @@ class KnowledgeBaseController extends Controller
             . "Dokumen ini sedang dipakai sebagai placeholder RAG untuk pengujian. "
             . "Gunakan pertanyaan yang merujuk pada judul, deskripsi, atau isi dokumen ini agar jawaban lebih spesifik. "
             . $topicHint;
+    }
+    /**
+ * Fallback content jika extracted_text kosong
+ */
+    private function buildFallbackContent(Document $doc): string
+    {
+        return "Dokumen: {$doc->title}\n\n" .
+            ($doc->description ? "Deskripsi: {$doc->description}\n\n" : '') .
+            "Dokumen ini belum memiliki teks yang berhasil diekstrak.";
     }
 
     /**

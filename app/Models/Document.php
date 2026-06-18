@@ -27,9 +27,12 @@ class Document extends Model
     ];
 
     protected $casts = [
-        'indexed_at' => 'datetime',
-        'file_size'  => 'integer',
-        'chunk_count' => 'integer',
+    'file_size'   => 'integer',
+    'chunk_count' => 'integer',
+    'indexed_at'  => 'datetime',
+    'extracted_text' => 'string',
+    'content'     => 'string',
+
     ];
 
     // ── Relationships ─────────────────────────────────────────────────────────

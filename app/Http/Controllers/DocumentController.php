@@ -6,6 +6,7 @@ use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Smalot\PdfParser\Parser;
 
 class DocumentController extends Controller
 {
@@ -22,40 +23,30 @@ class DocumentController extends Controller
             'application/vnd.ms-excel',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'text/csv',
-            'text/plain',  // beberapa sistem mengirim CSV sebagai text/plain
+            'text/plain',
         ],
     ];
 
-    /**
-     * Peta tipe dokumen → ekstensi yang diizinkan.
-     */
     private const TYPE_EXT_MAP = [
         'pdf' => ['pdf'],
         'docx' => ['doc', 'docx'],
         'excel' => ['xls', 'xlsx', 'csv'],
     ];
 
-    /**
-     * GET /dashboard/kelola-dokumen
-     * Tampilkan daftar dokumen dengan pagination & filter.
-     */
     public function index(Request $request)
     {
         $allowedTypes = ['pdf', 'docx', 'excel'];
 
         $query = Document::with('uploader')->latest();
 
-        // Filter by type
         if ($request->filled('type') && in_array($request->type, $allowedTypes)) {
             $query->ofType($request->type);
         }
 
-        // Filter by status
         if ($request->filled('status') && in_array($request->status, ['active', 'inactive', 'processing'])) {
             $query->where('status', $request->status);
         }
 
-        // Search by title
         if ($request->filled('search')) {
             $query->where('title', 'like', '%' . $request->search . '%');
         }
@@ -66,64 +57,82 @@ class DocumentController extends Controller
     }
 
     /**
-     * POST /dashboard/kelola-dokumen
-     * Upload & simpan dokumen baru.
+     * Upload Dokumen + Extract Text (khusus PDF)
      */
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'title' => ['required', 'string', 'max:255'],
+            'title'       => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'type' => ['required', 'in:pdf,docx,excel'],
-            'file' => [
-                'required',
-                'file',
-                'max:10240',                              // 10 MB
-                'mimes:pdf,doc,docx,xls,xlsx,csv',
-            ],
+            'type'        => ['required', 'in:pdf,docx,excel'],
+            'file'        => ['required','file','max:10240','mimes:pdf,doc,docx,xls,xlsx,csv'],
         ]);
 
         $file = $request->file('file');
-
-        // ── Validasi cross-check: ekstensi file vs tipe yang dipilih ─────────
-        $ext = strtolower($file->getClientOriginalExtension());
         $type = $validated['type'];
-        $allowedExts = self::TYPE_EXT_MAP[$type] ?? [];
 
-        if (!in_array($ext, $allowedExts)) {
-            return back()
-                ->withInput()
-                ->withErrors([
-                    'file' => sprintf(
-                        'File yang diupload (%s) tidak sesuai dengan tipe yang dipilih (%s). Ekstensi yang diizinkan: %s.',
-                        strtoupper($ext),
-                        strtoupper($type),
-                        implode(', ', array_map('strtoupper', $allowedExts))
-                    ),
-                ]);
+        // Validasi ekstensi
+        $ext = strtolower($file->getClientOriginalExtension());
+        if (!in_array($ext, self::TYPE_EXT_MAP[$type] ?? [])) {
+            return back()->withInput()->withErrors([
+                'file' => "File tidak sesuai dengan tipe yang dipilih ({$type}).",
+            ]);
         }
 
         $path = $file->store('documents', 'local');
 
         $data = [
-            'title' => $validated['title'],
-            'description' => $validated['description'] ?? null,
-            'type' => $type,
-            'file_path' => $path,
+            'title'             => $validated['title'],
+            'description'       => $validated['description'] ?? null,
+            'type'              => $type,
+            'file_path'         => $path,
             'original_filename' => $file->getClientOriginalName(),
-            'file_size' => $file->getSize(),
-            'mime_type' => $file->getMimeType(),
-            'status' => 'active',
-            'uploaded_by' => Auth::id(),
+            'file_size'         => $file->getSize(),
+            'mime_type'         => $file->getMimeType(),
+            'status'            => 'processing',           // Mulai processing
+            'uploaded_by'       => Auth::id(),
+            'extracted_text'    => null,                   // Akan diisi nanti
         ];
 
-        Document::create($data);
+        $document = Document::create($data);
 
-        \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " mengunggah file " . $data['original_filename'], 'upload');
+        // === EKSTRAKSI TEKS UNTUK PDF ===
+        if ($type === 'pdf') {
+            try {
+                $fullPath = Storage::disk('local')->path($path);
+
+                $parser = new Parser();
+                $pdf = $parser->parseFile($fullPath);
+
+                $text = $pdf->getText();                    // Ambil semua teks
+                $text = trim(preg_replace('/\s+/', ' ', $text)); // Bersihkan whitespace
+
+                $document->update([
+                    'extracted_text' => $text,
+                    'status'         => 'active',
+                ]);
+
+            } catch (\Exception $e) {
+                // Tetap simpan dokumen meski ekstraksi gagal
+                $document->update([
+                    'status' => 'active',
+                    'extracted_text' => 'Gagal mengekstrak teks: ' . $e->getMessage(),
+                ]);
+                \Log::error("PDF Extraction failed for document {$document->id}: " . $e->getMessage());
+            }
+        } else {
+            // Untuk docx/excel sementara kosong (bisa ditambah nanti)
+            $document->update(['status' => 'active']);
+        }
+
+        \App\Models\ActivityLog::log(
+            "Staff " . Auth::user()->name . " mengunggah file " . $data['original_filename'],
+            'upload'
+        );
 
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
-            ->with('success', 'Dokumen berhasil diupload.');
+            ->with('success', 'Dokumen berhasil diupload dan diproses.');
     }
 
     /**

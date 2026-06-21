@@ -104,8 +104,8 @@ class DocumentController extends Controller
                 $parser = new Parser();
                 $pdf = $parser->parseFile($fullPath);
 
-                $text = $pdf->getText();                    // Ambil semua teks
-                $text = trim(preg_replace('/\s+/', ' ', $text)); // Bersihkan whitespace
+                $text = $pdf->getText();
+                $text = trim(preg_replace('/\s+/', ' ', $text));
 
                 $document->update([
                     'extracted_text' => $text,
@@ -121,7 +121,6 @@ class DocumentController extends Controller
                 \Log::error("PDF Extraction failed for document {$document->id}: " . $e->getMessage());
             }
         } else {
-            // Untuk docx/excel sementara kosong (bisa ditambah nanti)
             $document->update(['status' => 'active']);
         }
 
@@ -129,6 +128,9 @@ class DocumentController extends Controller
             "Staff " . Auth::user()->name . " mengunggah file " . $data['original_filename'],
             'upload'
         );
+
+        // Perbarui timestamp knowledge base setiap ada upload dokumen baru
+        $this->updateKbTimestamp();
 
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
@@ -210,6 +212,9 @@ class DocumentController extends Controller
 
         \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " menghapus dokumen " . $title, 'delete');
 
+        // Perbarui timestamp knowledge base setiap ada penghapusan dokumen
+        $this->updateKbTimestamp();
+
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
             ->with('success', 'Dokumen "' . $title . '" berhasil dihapus.');
@@ -226,8 +231,25 @@ class DocumentController extends Controller
 
         \App\Models\ActivityLog::log("Staff " . Auth::user()->name . " memulihkan dokumen " . $document->title, 'update');
 
+        // Perbarui timestamp knowledge base setiap ada pemulihan dokumen
+        $this->updateKbTimestamp();
+
         return redirect()
             ->route('dashboard.kelola-dokumen.index')
             ->with('success', 'Dokumen berhasil dipulihkan.');
+    }
+
+    /**
+     * Perbarui timestamp pembaruan knowledge base (format bahasa Indonesia).
+     */
+    private function updateKbTimestamp(): void
+    {
+        $months = [
+            1 => 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
+        ];
+        $now = now();
+        $formatted = $now->day . ' ' . $months[$now->month] . ' ' . $now->year;
+        \App\Models\Setting::setVal('kb_last_updated_at', $formatted);
     }
 }

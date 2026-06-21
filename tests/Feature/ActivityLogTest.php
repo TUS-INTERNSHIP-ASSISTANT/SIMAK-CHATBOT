@@ -195,7 +195,7 @@ class ActivityLogTest extends TestCase
             ->post(route('dashboard.knowledge-base.settings'), [
                 'system_prompt' => 'New prompt text',
                 'knowledge_base_prompt' => 'New kb text',
-                'model' => 'gemini-1.5-flash',
+                'model' => 'groq-llama3-8b',
                 'temperature' => 0.5,
                 'chunk_size' => 750,
                 'chunk_overlap' => 150,

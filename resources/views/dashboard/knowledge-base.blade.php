@@ -597,6 +597,8 @@
         input.focus();
     }
 
+    let playgroundChatHistory = [];
+
     function submitPlaygroundQuery(e) {
         e.preventDefault();
 
@@ -619,9 +621,15 @@
         typingIndicator.classList.remove('hidden');
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
+        // Prepare history to send (max 4 messages)
+        const historyToSend = playgroundChatHistory.slice(-4);
+        
+        // Push current query to history
+        playgroundChatHistory.push({ role: 'user', content: query });
+
         fetch("{{ route('dashboard.knowledge-base.query') }}", {
             method: 'POST',
-            body: JSON.stringify({ query: query }),
+            body: JSON.stringify({ query: query, history: historyToSend }),
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
@@ -632,6 +640,7 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
+                playgroundChatHistory.push({ role: 'assistant', content: data.answer });
                 appendBotMessage(data.answer, data.source);
             } else {
                 appendBotMessage('Gagal memproses pertanyaan. Silakan coba lagi.');

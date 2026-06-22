@@ -200,6 +200,8 @@
         }
     }
 
+    let landingChatHistory = [];
+
     function submitLandingChatForm(e) {
         if (e) e.preventDefault();
 
@@ -229,9 +231,15 @@
         typingIndicator.classList.remove('hidden');
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
+        // Prepare history to send (max 4 messages)
+        const historyToSend = landingChatHistory.slice(-4);
+        
+        // Push current query to history
+        landingChatHistory.push({ role: 'user', content: query });
+
         fetch("{{ route('chatbot.query') }}", {
             method: 'POST',
-            body: JSON.stringify({ query: query }),
+            body: JSON.stringify({ query: query, history: historyToSend }),
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': '{{ csrf_token() }}',
@@ -242,6 +250,7 @@
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
+                    landingChatHistory.push({ role: 'assistant', content: data.answer });
                     appendLandingBotMessage(data.answer, data.source);
                 } else {
                     appendLandingBotMessage('Maaf, saya sedang mengalami kendala. Silakan coba lagi nanti.');

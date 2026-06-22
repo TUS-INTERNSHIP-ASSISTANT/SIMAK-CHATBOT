@@ -144,20 +144,25 @@ class KnowledgeBaseController extends Controller
     {
         $request->validate([
             'query' => ['required', 'string', 'max:500'],
+            'history' => ['nullable', 'array', 'max:5'],
+            'history.*.role' => ['required', 'string', 'in:user,assistant'],
+            'history.*.content' => ['required', 'string', 'max:1000'],
         ]);
 
         $query = $request->input('query');
+        $history = $request->input('history', []);
+        
         $model = Setting::getVal('rag_model', 'groq-llama3-8b');
         $temperature = (float) Setting::getVal('rag_temperature', 0.5);
         $chunkSize = (int) Setting::getVal('rag_chunk_size', 750);
         $chunkOverlap = (int) Setting::getVal('rag_chunk_overlap', 150);
         $systemPrompt = Setting::getVal(
             'rag_system_prompt',
-            'Anda adalah SIMAK, Asisten Virtual Student Service Center (SSC) Telkom University Surabaya yang bertugas membantu mahasiswa mendapatkan informasi seputar Magang dan Kerja Praktik. Berikan jawaban yang ramah, profesional, dan mudah dipahami hanya berdasarkan dokumen referensi yang tersedia. Akhiri setiap jawaban dengan kalimat penutup yang natural dan ramah, seperti "Semoga informasi ini membantu. Jika ada pertanyaan lain seputar Magang atau Kerja Praktik, silakan tanyakan kembali." Jika informasi tidak tersedia dalam dokumen, sampaikan dengan sopan bahwa informasi tersebut tidak ditemukan dan sarankan mahasiswa untuk menghubungi SSC Telkom University Surabaya secara langsung.'
+            'Anda adalah SIMAK, Asisten Virtual Student Service Center (SSC) Telkom University Surabaya. Berikan jawaban yang ramah, profesional, dan mudah dipahami HANYA berdasarkan dokumen referensi yang tersedia. JANGAN PERNAH mengarang URL, link, atau tautan. Jika dokumen tidak memuat link/URL yang diminta, sampaikan dengan sopan bahwa tautan tidak tersedia di basis pengetahuan. JANGAN menebak. Jika konteks memuat URL, tampilkan URL tersebut utuh tanpa mengubahnya. Gunakan format Markdown (bullet list, numbering, bold) agar rapi. JANGAN pernah mencetak teks internal seperti "Pertanyaan pengguna:" atau "Jawaban:". Langsung berikan informasi.'
         );
         $knowledgeBasePrompt = Setting::getVal(
             'rag_knowledge_base_prompt',
-            'Knowledge base SIMAK: Fokus pada informasi Magang dan Kerja Praktik di Telkom University Surabaya. Jika dokumen referensi tidak terbaca sepenuhnya atau tidak memuat detail yang dicari, gunakan pengetahuan domain ini untuk memberi jawaban yang paling dekat dengan konteks SIMAK, lalu sebutkan bahwa jawaban tersebut dibantu oleh pedoman knowledge base.'
+            'Knowledge base SIMAK: Jawab HANYA dari dokumen ini. Dilarang keras mengarang informasi atau link di luar dokumen.'
         );
 
         if ($this->isGeneralConversation($query)) {
@@ -171,16 +176,25 @@ class KnowledgeBaseController extends Controller
         // Ambil seluruh dokumen aktif untuk retrieval konteks RAG.
         $activeDocs = Document::active()->whereNotNull('content')->get();
 
-        $retrievedDocs = $this->retrieveRelevantDocuments($query, $activeDocs, $chunkSize, $chunkOverlap, 3);
+        $retrievalQuery = $query;
+        $isFollowUp = preg_match('/\b(link|tautan|itu|tadi|dong|nya|kalau|mana|bagi|kasih|minta)\b/i', $query) || str_word_count($query) <= 3;
+        if ($isFollowUp && !empty($history)) {
+            $lastUserMsg = collect($history)->where('role', 'user')->last();
+            if ($lastUserMsg) {
+                $retrievalQuery = $lastUserMsg['content'] . ' ' . $query;
+            }
+        }
+
+        $retrievedDocs = $this->retrieveRelevantDocuments($retrievalQuery, $activeDocs, $chunkSize, $chunkOverlap, 3);
         $topDoc = $retrievedDocs[0]['doc'] ?? null;
 
         $answer = null;
 
         // Jalankan query ke API sesuai model yang dipilih.
         if (str_starts_with($model, 'groq-')) {
-            $answer = $this->queryGroq($query, $retrievedDocs, $systemPrompt, $knowledgeBasePrompt, $model, $temperature);
+            $answer = $this->queryGroq($query, $history, $retrievedDocs, $systemPrompt, $knowledgeBasePrompt, $model, $temperature);
         } elseif (str_starts_with($model, 'openai-')) {
-            $answer = $this->queryOpenAI($query, $retrievedDocs, $systemPrompt, $knowledgeBasePrompt, $model, $temperature);
+            $answer = $this->queryOpenAI($query, $history, $retrievedDocs, $systemPrompt, $knowledgeBasePrompt, $model, $temperature);
         }
 
         // Fallback lokal dipertahankan jika API gagal atau model tidak dikenal.
@@ -234,7 +248,7 @@ class KnowledgeBaseController extends Controller
     private function retrieveRelevantDocuments(string $query, Collection $activeDocs, int $chunkSize, int $chunkOverlap, int $limit = 3): array
     {
         $queryLower = strtolower($query);
-        $queryLower = preg_replace('/\bk\.?p\.?\b/u', ' kerja praktik ', $queryLower);
+        $queryLower = $this->normalizeQueryForRetrieval($queryLower);
         $queryLower = preg_replace(self::NORMALIZE_WHITESPACE_PATTERN, ' ', $queryLower);
         $queryLower = trim((string) $queryLower);
         $scored = [];
@@ -315,7 +329,7 @@ class KnowledgeBaseController extends Controller
         }
 
         $matchedTokens = $this->countMatchedTokens($words, $chunkLower, $chunkLower, $chunkLower);
-        if ($matchedTokens < 2 && !str_contains($chunkLower, $queryLower)) {
+        if ($matchedTokens < 1 && !str_contains($chunkLower, $queryLower)) {
             return 0;
         }
 
@@ -351,7 +365,7 @@ class KnowledgeBaseController extends Controller
 
         $matchedTokens = $this->countMatchedTokens($words, $title, $description, $content);
 
-        if ($matchedTokens < 2 && !str_contains($content, $queryLower)) {
+        if ($matchedTokens < 1 && !str_contains($content, $queryLower)) {
             return 0;
         }
 
@@ -418,7 +432,7 @@ class KnowledgeBaseController extends Controller
         return trim(substr($content, $start, 900));
     }
 
-    private function queryGroq(string $query, array $retrievedDocs, string $systemPrompt, string $knowledgeBasePrompt, string $selectedModel, float $temperature): ?string
+    private function queryGroq(string $query, array $history, array $retrievedDocs, string $systemPrompt, string $knowledgeBasePrompt, string $selectedModel, float $temperature): ?string
     {
         $apiKey = (string) config('services.groq.api_key');
         if ($apiKey === '') {
@@ -428,22 +442,34 @@ class KnowledgeBaseController extends Controller
         $context = $this->buildRagContext($retrievedDocs);
         $questionHints = $this->buildQuestionHints($query);
 
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => $systemPrompt . "\n\n" . $knowledgeBasePrompt,
+            ],
+        ];
+
+        foreach ($history as $msg) {
+            if (isset($msg['role'], $msg['content']) && in_array($msg['role'], ['user', 'assistant'])) {
+                $messages[] = [
+                    'role' => $msg['role'],
+                    'content' => $msg['content'],
+                ];
+            }
+        }
+
+        $messages[] = [
+            'role' => 'user',
+            'content' => "Konteks dokumen:\n{$context}\n\nPetunjuk interpretasi pertanyaan: {$questionHints}\n\nPertanyaan pengguna: {$query}\n\nInstruksi: Jawab pertanyaan pengguna HANYA berdasarkan konteks dokumen. Jika informasi tidak ada di konteks, katakan tidak ditemukan di basis pengetahuan.",
+        ];
+
         $response = Http::withToken($apiKey)
             ->timeout((int) config('services.groq.timeout', 30))
             ->post(rtrim((string) config('services.groq.base_url', 'https://api.groq.com/openai/v1'), '/') . '/chat/completions', [
                 'model' => $this->mapGroqModel($selectedModel),
                 'temperature' => max(0, min(1, $temperature)),
                 'max_tokens' => 900,
-                'messages' => [
-                    [
-                        'role' => 'system',
-                        'content' => $systemPrompt . "\n\n" . $knowledgeBasePrompt . "\n\nAturan tambahan: jawab pertanyaan pengguna secara spesifik sesuai maksud pertanyaan. Jangan mengulang kalimat yang sama untuk semua pertanyaan. Jika pengguna bertanya 'di mana', sebutkan lokasi atau kanal pendaftaran. Jika pengguna bertanya 'apa nama website', sebutkan hanya nama website yang benar-benar disebut di konteks. Jika nama website tidak disebut, katakan bahwa dokumen hanya menyebut kanal/portal tanpa nama domain spesifik.",
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => "Pertanyaan pengguna: {$query}\n\nPetunjuk interpretasi pertanyaan: {$questionHints}\n\nKonteks dokumen:\n{$context}\n\nInstruksi: Jawab ringkas, jelas, dan langsung ke inti pertanyaan. Hindari jawaban template yang persis sama untuk pertanyaan berbeda. Jika informasi tidak ada di konteks, katakan tidak ditemukan di basis pengetahuan.",
-                    ],
-                ],
+                'messages' => $messages,
             ]);
 
         if (!$response->successful()) {
@@ -464,7 +490,7 @@ class KnowledgeBaseController extends Controller
         };
     }
 
-    private function queryOpenAI(string $query, array $retrievedDocs, string $systemPrompt, string $knowledgeBasePrompt, string $selectedModel, float $temperature): ?string
+    private function queryOpenAI(string $query, array $history, array $retrievedDocs, string $systemPrompt, string $knowledgeBasePrompt, string $selectedModel, float $temperature): ?string
     {
         $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
@@ -474,22 +500,34 @@ class KnowledgeBaseController extends Controller
         $context = $this->buildRagContext($retrievedDocs);
         $questionHints = $this->buildQuestionHints($query);
 
+        $messages = [
+            [
+                'role' => 'system',
+                'content' => $systemPrompt . "\n\n" . $knowledgeBasePrompt,
+            ],
+        ];
+
+        foreach ($history as $msg) {
+            if (isset($msg['role'], $msg['content']) && in_array($msg['role'], ['user', 'assistant'])) {
+                $messages[] = [
+                    'role' => $msg['role'],
+                    'content' => $msg['content'],
+                ];
+            }
+        }
+
+        $messages[] = [
+            'role' => 'user',
+            'content' => "Konteks dokumen:\n{$context}\n\nPetunjuk interpretasi pertanyaan: {$questionHints}\n\nPertanyaan pengguna: {$query}\n\nInstruksi: Jawab pertanyaan pengguna HANYA berdasarkan konteks dokumen. Jika informasi tidak ada di konteks, katakan tidak ditemukan di basis pengetahuan.",
+        ];
+
         $response = Http::withToken($apiKey)
             ->timeout((int) config('services.openai.timeout', 30))
             ->post(rtrim((string) config('services.openai.base_url', 'https://api.openai.com/v1'), '/') . '/chat/completions', [
                 'model' => $this->mapOpenAIModel($selectedModel),
                 'temperature' => max(0, min(1, $temperature)),
                 'max_tokens' => 900,
-                'messages' => [
-                    [
-                        'role' => 'system',
-                        'content' => $systemPrompt . "\n\n" . $knowledgeBasePrompt . "\n\nAturan tambahan: jawab pertanyaan pengguna secara spesifik sesuai maksud pertanyaan. Jangan mengulang kalimat yang sama untuk semua pertanyaan. Jika pengguna bertanya 'di mana', sebutkan lokasi atau kanal pendaftaran. Jika pengguna bertanya 'apa nama website', sebutkan hanya nama website yang benar-benar disebut di konteks. Jika nama website tidak disebut, katakan bahwa dokumen hanya menyebut kanal/portal tanpa nama domain spesifik.",
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => "Pertanyaan pengguna: {$query}\n\nPetunjuk interpretasi pertanyaan: {$questionHints}\n\nKonteks dokumen:\n{$context}\n\nInstruksi: Jawab ringkas, jelas, dan langsung ke inti pertanyaan. Hindari jawaban template yang persis sama untuk pertanyaan berbeda. Jika informasi tidak ada di konteks, katakan tidak ditemukan di basis pengetahuan.",
-                    ],
-                ],
+                'messages' => $messages,
             ]);
 
         if (!$response->successful()) {
@@ -557,9 +595,39 @@ class KnowledgeBaseController extends Controller
             $hint = 'Pengguna menanyakan syarat atau persyaratan.';
         } elseif (str_contains($queryLower, 'daftar') || str_contains($queryLower, 'pendaftaran') || str_contains($queryLower, 'registrasi')) {
             $hint = 'Pengguna menanyakan prosedur pendaftaran.';
+        } elseif (str_contains($queryLower, 'link') || str_contains($queryLower, 'tautan')
+               || str_contains($queryLower, 'unduh') || str_contains($queryLower, 'download')
+               || str_contains($queryLower, 'berikan') || str_contains($queryLower, 'kasih')
+               || str_contains($queryLower, 'minta') || str_contains($queryLower, 'cari')) {
+            $hint = 'Pengguna meminta tautan atau link untuk mengunduh atau mengakses dokumen maupun sumber terkait. Berikan tautan/URL yang tersedia di konteks dokumen secara langsung.';
         }
 
         return $hint;
+    }
+
+    /**
+     * Normalisasi query agar intent informal bisa dikenali saat pencarian dokumen.
+     * Meng-strip kata perintah/aksi dan mengekspansi singkatan domain.
+     */
+    private function normalizeQueryForRetrieval(string $queryLower): string
+    {
+        // Ekspansi singkatan domain
+        $queryLower = preg_replace('/\bk\.?p\.?\b/u', ' kerja praktik ', $queryLower);
+
+        // Strip kata-kata aksi/perintah informal yang tidak ada di dokumen
+        $actionWords = [
+            'berikan', 'kasih', 'tolong', 'minta', 'carikan',
+            'ingin', 'bisa', 'bantu', 'bantuin',
+            'tampilkan', 'tunjukkan', 'lihatkan', 'buatkan',
+        ];
+        foreach ($actionWords as $word) {
+            $queryLower = preg_replace('/\b' . preg_quote($word, '/') . '\b/u', ' ', $queryLower);
+        }
+
+        // Normalkan kata "link/tautan/unduh" menjadi kata yang tersedia di dokumen
+        $queryLower = preg_replace('/\b(link|tautan|url|download|unduh)\b/u', 'akses', $queryLower);
+
+        return trim(preg_replace('/\s+/', ' ', $queryLower));
     }
 
     private function isGeneralConversation(string $query): bool
@@ -600,26 +668,6 @@ class KnowledgeBaseController extends Controller
 
         if (str_contains($queryLower, 'kamu siapa') || str_contains($queryLower, 'siapa kamu') || str_contains($queryLower, 'nama kamu') || str_contains($queryLower, 'apa nama kamu')) {
             return 'Halo! Saya SIMAK, Asisten Virtual Student Service Center (SSC) Telkom University Surabaya. Saya siap membantu menjawab pertanyaan seputar Magang dan Kerja Praktik. Silakan tanyakan apa yang ingin Anda ketahui.';
-        }
-
-        if (str_contains($queryLower, 'template laporan kp') || str_contains($queryLower, 'template laporan kerja praktik')) {
-            return "Berikut adalah template laporan Kerja Praktik yang dapat Anda unduh:\n\nhttps://telkomuniversityofficial-my.sharepoint.com/:w:/g/personal/akademiksby_telkomuniversity_ac_id/ETugZTCtDo9NskNSKVZ2U-8BP7rtdbS5HQmOV2xE69FIyg?e=73Zmfq\n\nApabila masih ada pertanyaan mengenai Magang atau Kerja Praktik, saya siap membantu.";
-        }
-
-        if (str_contains($queryLower, 'template proposal kp') || str_contains($queryLower, 'template proposal kerja praktik')) {
-            return "Berikut adalah template proposal Kerja Praktik yang dapat Anda unduh:\n\nhttps://telkomuniversityofficial-my.sharepoint.com/:w:/g/personal/akademiksby_telkomuniversity_ac_id/EeO5Q_3F5c9Kqt8xDtKwDqUB2JWzm3w48HkRLJpw5ZB8Bw?e=doIM44\n\nSemoga membantu. Jika ada pertanyaan lain, jangan ragu untuk bertanya.";
-        }
-
-        if (str_contains($queryLower, 'buku pedoman kp') || str_contains($queryLower, 'buku pedoman kerja praktik')) {
-            return "Buku Pedoman Kerja Praktik dapat dilihat dan diunduh melalui tautan berikut:\n\nhttps://linktr.ee/laa.upps.sby\n\nSemoga informasi ini membantu. Jika ada pertanyaan lain seputar Kerja Praktik, silakan tanyakan kembali.";
-        }
-
-        if (str_contains($queryLower, 'permohonan kp') || str_contains($queryLower, 'permohonan kerja praktik') || str_contains($queryLower, 'mengajukan permohonan')) {
-            return "Pengajuan permohonan Kerja Praktik dapat dilakukan melalui tautan berikut:\n\nhttps://forms.office.com/r/fDLRurDYL5\n\nApabila masih ada pertanyaan, saya siap membantu.";
-        }
-
-        if (str_contains($queryLower, 'surat pengantar kp') || str_contains($queryLower, 'surat pengantar kerja praktik')) {
-            return "Panduan pengajuan surat pengantar Kerja Praktik dapat diakses melalui tautan berikut:\n\nhttps://telkomuniversityofficial-my.sharepoint.com/:b:/g/personal/akademiksby_telkomuniversity_ac_id/EWLuBIrAWOJFnQ-Gkx4MdiMB7dpv15Ld32X68pJjbm2Vkg?e=7sxZDv\n\nSemoga informasi ini membantu. Jika ada pertanyaan lain, silakan tanyakan kembali.";
         }
 
         if (str_contains($queryLower, 'terima kasih') || str_contains($queryLower, 'makasih') || str_contains($queryLower, 'thanks')) {

@@ -90,19 +90,17 @@
             </div>
         </div>
 
-        {{-- Card 4: Model Status --}}
+        {{-- Card 4: KB Last Updated --}}
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex items-start gap-4 hover:shadow-md transition-shadow duration-200">
-            <div class="w-11 h-11 rounded-xl bg-purple-50 flex items-center justify-center shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            <div class="w-11 h-11 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
             </div>
             <div class="min-w-0">
-                <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Model AI Aktif</p>
-                <p class="text-lg font-bold text-gray-900 mt-0.5 capitalize truncate" id="stat-active-model">
-                    {{ $model === 'groq-llama3-8b' ? 'Groq Llama 3.1 8B' : ($model === 'groq-llama3-70b' ? 'Groq Llama 3.3 70B' : str_replace('gemini-', 'Gemini ', $model)) }}
-                </p>
-                <p class="text-xs text-gray-400 mt-0.5">Status: Terkoneksi</p>
+                <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">Basis Pengetahuan</p>
+                <p class="text-sm font-bold text-gray-900 mt-0.5 truncate" id="stat-kb-last-updated">{{ $kbLastUpdated ?? 'Belum diperbarui' }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">Terakhir diperbarui</p>
             </div>
         </div>
     </div>
@@ -150,10 +148,8 @@
                         id="model"
                         required
                         class="w-full text-sm rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-[#7A203A]/20 focus:border-[#7A203A] transition text-gray-700">
-                        <option value="gemini-1.5-flash" {{ $model === 'gemini-1.5-flash' ? 'selected' : '' }}>Gemini 1.5 Flash (Direkomendasikan)</option>
-                        <option value="gemini-1.5-pro" {{ $model === 'gemini-1.5-pro' ? 'selected' : '' }}>Gemini 1.5 Pro</option>
-                        <option value="groq-llama3-8b" {{ $model === 'groq-llama3-8b' ? 'selected' : '' }}>Groq / Llama 3.1 8B (Instant)</option>
-                        <option value="groq-llama3-70b" {{ $model === 'groq-llama3-70b' ? 'selected' : '' }}>Groq / Llama 3.3 70B (Versatile)</option>
+                        <option value="groq-llama3-8b" {{ $model === 'groq-llama3-8b' ? 'selected' : '' }}>Groq / Llama 3.1 8B Instant (Direkomendasikan)</option>
+                        <option value="openai-gpt-4o-mini" {{ $model === 'openai-gpt-4o-mini' ? 'selected' : '' }}>OpenAI / GPT-4o Mini</option>
                     </select>
                 </div>
 
@@ -447,21 +443,42 @@
                 'Accept': 'application/json'
             }
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => {
+                    throw err;
+                }).catch(() => {
+                    throw new Error('Gagal memproses permintaan pada server (Status: ' + response.status + ').');
+                });
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.success) {
                 showToast(data.message, 'success');
-                // Update active model stat
-                const selectedModel = document.getElementById('model').value;
-                let formattedModel = selectedModel === 'groq-llama3-8b' ? 'Groq Llama 3.1 8B' : (selectedModel === 'groq-llama3-70b' ? 'Groq Llama 3.3 70B' : selectedModel.replace('gemini-', 'Gemini '));
-                document.getElementById('stat-active-model').textContent = formattedModel;
+                // Update active model stat if the element exists
+                const activeModelEl = document.getElementById('stat-active-model');
+                if (activeModelEl) {
+                    const selectedModel = document.getElementById('model').value;
+                    let formattedModel = selectedModel === 'groq-llama3-8b' ? 'Groq Llama 3.1 8B' : (selectedModel === 'openai-gpt-4o-mini' ? 'OpenAI GPT-4o Mini' : selectedModel);
+                    activeModelEl.textContent = formattedModel;
+                }
             } else {
                 showToast(data.message || 'Gagal menyimpan konfigurasi.', 'error');
             }
         })
         .catch(err => {
             console.error('Settings save error:', err);
-            showToast('Terjadi kesalahan koneksi saat menyimpan konfigurasi.', 'error');
+            let errorMsg = 'Terjadi kesalahan koneksi saat menyimpan konfigurasi.';
+            if (err.errors) {
+                const firstErrorKey = Object.keys(err.errors)[0];
+                if (firstErrorKey && err.errors[firstErrorKey].length > 0) {
+                    errorMsg = err.errors[firstErrorKey][0];
+                }
+            } else if (err.message) {
+                errorMsg = err.message;
+            }
+            showToast(errorMsg, 'error');
         })
         .finally(() => {
             btn.disabled = false;
@@ -513,6 +530,11 @@
                 // Update stats
                 document.getElementById('stat-last-sync').textContent = data.last_sync;
                 document.getElementById('stat-total-chunks').textContent = data.total_chunks;
+                // Update KB timestamp jika tersedia
+                if (data.kb_last_updated) {
+                    const kbEl = document.getElementById('stat-kb-last-updated');
+                    if (kbEl) kbEl.textContent = data.kb_last_updated;
+                }
 
                 // Update table row badges
                 docs.forEach(id => {
@@ -575,6 +597,8 @@
         input.focus();
     }
 
+    let playgroundChatHistory = [];
+
     function submitPlaygroundQuery(e) {
         e.preventDefault();
 
@@ -597,9 +621,15 @@
         typingIndicator.classList.remove('hidden');
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
+        // Prepare history to send (max 4 messages)
+        const historyToSend = playgroundChatHistory.slice(-4);
+        
+        // Push current query to history
+        playgroundChatHistory.push({ role: 'user', content: query });
+
         fetch("{{ route('dashboard.knowledge-base.query') }}", {
             method: 'POST',
-            body: JSON.stringify({ query: query }),
+            body: JSON.stringify({ query: query, history: historyToSend }),
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
@@ -610,6 +640,7 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
+                playgroundChatHistory.push({ role: 'assistant', content: data.answer });
                 appendBotMessage(data.answer, data.source);
             } else {
                 appendBotMessage('Gagal memproses pertanyaan. Silakan coba lagi.');
@@ -681,21 +712,18 @@
     }
 
     function escapeHTML(str) {
-        return str.replace(/[&<>'"]/g,
-            tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+        return str.replace(/[&<>"']/g,
+            tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[tag] || tag)
         );
     }
 
     function formatMarkdown(text) {
         if (!text) return '';
 
-        // First, escape HTML characters to prevent XSS
-        let escaped = escapeHTML(text);
-
-        // Split text by lines to handle block elements (headings, lists, paragraphs)
-        const lines = escaped.split('\n');
+        // Split text by lines to handle block elements
+        const lines = text.split('\n');
         let htmlResult = [];
-        let currentListType = null; // 'ul', 'ol', or null
+        let currentListType = null;
 
         function closeList() {
             if (currentListType) {
@@ -708,28 +736,24 @@
             let line = lines[i];
             let trimmed = line.trim();
 
-            // 1. Heading Markdown (e.g. ### Heading)
-            const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+            // 1. Heading Markdown
+            const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
             if (headingMatch) {
                 closeList();
                 const level = headingMatch[1].length;
-                const headingText = headingMatch[2];
-                const formattedText = formatInlineMarkdown(headingText);
-                
+                const formattedText = formatInlineMarkdown(headingMatch[2]);
                 let headingClass = 'font-bold text-gray-900 my-2 block';
                 if (level === 1) headingClass += ' text-lg text-[#7A203A]';
                 else if (level === 2) headingClass += ' text-md text-[#7A203A]';
                 else headingClass += ' text-sm';
-
                 htmlResult.push(`<h${level} class="${headingClass}">${formattedText}</h${level}>`);
                 continue;
             }
 
-            // 2. Unordered List Markdown (e.g. - item or * item)
-            const ulMatch = line.match(/^(\s*)[-*]\s+(.+)$/);
+            // 2. Unordered List
+            const ulMatch = trimmed.match(/^[-*]\s+(.+)$/);
             if (ulMatch) {
-                const listContent = ulMatch[2];
-                const formattedContent = formatInlineMarkdown(listContent);
+                const formattedContent = formatInlineMarkdown(ulMatch[1]);
                 if (currentListType !== 'ul') {
                     closeList();
                     htmlResult.push('<ul class="list-disc pl-5 my-2 space-y-1">');
@@ -739,11 +763,10 @@
                 continue;
             }
 
-            // 3. Ordered List Markdown (e.g. 1. item)
-            const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+            // 3. Ordered List
+            const olMatch = trimmed.match(/^\d+\.\s+(.+)$/);
             if (olMatch) {
-                const listContent = olMatch[2];
-                const formattedContent = formatInlineMarkdown(listContent);
+                const formattedContent = formatInlineMarkdown(olMatch[1]);
                 if (currentListType !== 'ol') {
                     closeList();
                     htmlResult.push('<ol class="list-decimal pl-5 my-2 space-y-1">');
@@ -755,32 +778,69 @@
 
             // 4. Empty lines
             if (trimmed === '') {
-                if (currentListType) {
-                    continue;
-                }
+                if (currentListType) continue;
                 closeList();
                 htmlResult.push('<div class="h-2"></div>');
                 continue;
             }
 
-            // 5. Normal text line (or continuation of a paragraph)
+            // 5. Normal text line
             closeList();
-            const formattedLine = formatInlineMarkdown(line);
-            htmlResult.push(`<p class="text-xs sm:text-sm text-gray-700 leading-relaxed mb-2">${formattedLine}</p>`);
+            htmlResult.push(`<p class="text-xs sm:text-sm text-gray-700 leading-relaxed mb-2">${formatInlineMarkdown(line)}</p>`);
         }
 
         closeList();
-
         return htmlResult.join('\n');
     }
 
     function formatInlineMarkdown(text) {
-        // Bold: **text**
-        let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900">$1</strong>');
-        // Italic: *text* or _text_
-        formatted = formatted.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
-        formatted = formatted.replace(/_(.*?)_/g, '<em class="italic">$1</em>');
-        return formatted;
+        if (!text) return '';
+
+        const placeholders = [];
+        let processed = text;
+
+        // 1. Ekstrak markdown links [teks](url)
+        processed = processed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, linkText, url) => {
+            const idx = placeholders.length;
+            placeholders.push({ type: 'mdlink', text: linkText, url: url });
+            return `\x00PH${idx}\x00`;
+        });
+
+        // 2. Ekstrak bare URLs
+        processed = processed.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]*[^\s<>"{}|\\^`[\].,;:!?()'])/g, (match) => {
+            const idx = placeholders.length;
+            placeholders.push({ type: 'url', url: match });
+            return `\x00PH${idx}\x00`;
+        });
+
+        // 3. Escape HTML
+        let result = processed.replace(/[&<>"']/g, tag => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[tag] || tag));
+
+        // 4. Bold dan italic
+        result = result.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900">$1</strong>');
+        result = result.replace(/\*([^*]+)\*/g, '<em class="italic">$1</em>');
+        result = result.replace(/_([^_]+)_/g, '<em class="italic">$1</em>');
+
+        // 5. Kembalikan URL placeholder sebagai hyperlink
+        result = result.replace(/\x00PH(\d+)\x00/g, (match, idx) => {
+            const p = placeholders[parseInt(idx)];
+            const safeUrl = p.url.replace(/"/g, '%22').replace(/'/g, '%27').replace(/</g, '%3C').replace(/>/g, '%3E');
+            if (p.type === 'mdlink') {
+                const safeText = p.text.replace(/[&<>"']/g, tag => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[tag] || tag));
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[#7A203A] underline hover:text-[#5A182C] break-all">${safeText}</a>`;
+            } else {
+                const displayUrl = p.url.replace(/[&<>"']/g, tag => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[tag] || tag));
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[#7A203A] underline hover:text-[#5A182C] break-all">${displayUrl}</a>`;
+            }
+        });
+
+        return result;
     }
 </script>
 @endpush

@@ -92,9 +92,9 @@ class KnowledgeBaseTest extends TestCase
             ->postJson(route('dashboard.knowledge-base.settings'), [
                 'system_prompt' => 'New custom system instructions.',
                 'knowledge_base_prompt' => 'Knowledge base tuning instructions.',
-                'model'         => 'gemini-1.5-pro',
-                'temperature'   => 0.7,
-                'chunk_size'    => 800,
+                'model' => 'groq-llama3-8b',
+                'temperature' => 0.7,
+                'chunk_size' => 800,
                 'chunk_overlap' => 200,
             ]);
 
@@ -107,7 +107,7 @@ class KnowledgeBaseTest extends TestCase
         // Cek database
         $this->assertEquals('New custom system instructions.', Setting::getVal('rag_system_prompt'));
         $this->assertEquals('Knowledge base tuning instructions.', Setting::getVal('rag_knowledge_base_prompt'));
-        $this->assertEquals('gemini-1.5-pro', Setting::getVal('rag_model'));
+        $this->assertEquals('groq-llama3-8b', Setting::getVal('rag_model'));
         $this->assertEquals(0.7, (float) Setting::getVal('rag_temperature'));
         $this->assertEquals(800, (int) Setting::getVal('rag_chunk_size'));
         $this->assertEquals(200, (int) Setting::getVal('rag_chunk_overlap'));
@@ -146,6 +146,10 @@ class KnowledgeBaseTest extends TestCase
      */
     public function test_can_query_playground()
     {
+
+        config()->set('services.groq.api_key', '');
+        config()->set('services.openai.api_key', '');
+
         // Buat dokumen aktif dengan content untuk dicocokkan
         Document::create([
             'title' => self::DOC_TITLE_MAGANG,
@@ -169,14 +173,14 @@ class KnowledgeBaseTest extends TestCase
             'title' => self::DOC_TITLE_MAGANG,
         ]);
 
-        // Tidak cocok
+        // Tidak cocok – pastikan fallback lokal digunakan
         $responseNoMatch = $this->actingAs($this->user, 'web')
             ->postJson(route('dashboard.knowledge-base.query'), [
                 'query' => 'Jadwal wisuda tahun ini',
             ]);
 
         $responseNoMatch->assertStatus(200);
-        $this->assertStringContainsString('Maaf, saya tidak menemukan informasi yang relevan', $responseNoMatch->json('answer'));
+        $this->assertStringContainsString('tidak menemukan', $responseNoMatch->json('answer'));
     }
 
     /**
@@ -184,6 +188,10 @@ class KnowledgeBaseTest extends TestCase
      */
     public function test_can_query_chatbot_publicly()
     {
+        // Null out API key agar fallback lokal digunakan (tidak memanggil API eksternal)
+        config()->set('services.groq.api_key', '');
+        config()->set('services.openai.api_key', '');
+
         // Buat dokumen aktif dengan content untuk dicocokkan
         Document::create([
             'title' => 'SOP Kerja Praktik Elektro',
@@ -253,7 +261,7 @@ class KnowledgeBaseTest extends TestCase
         Http::assertSent(function ($request) {
             return str_contains($request->url(), '/chat/completions')
                 && data_get($request->data(), 'model') === 'llama-3.1-8b-instant'
-                && str_contains(data_get($request->data(), 'messages.0.content', ''), 'Aturan tambahan');
+                && str_contains(data_get($request->data(), 'messages.0.content', ''), 'Anda asisten SIMAK.');
         });
     }
 
@@ -346,7 +354,7 @@ class KnowledgeBaseTest extends TestCase
     }
 
     /**
-     * Test query dengan singkatan "kp" tetap dapat menemukan dokumen kerja praktik.
+     * Test query menggunakan singkatan "kp" tetap dapat menemukan dokumen kerja praktik.
      */
     public function test_query_with_kp_abbreviation_can_match_kerja_praktik_content()
     {
@@ -372,5 +380,77 @@ class KnowledgeBaseTest extends TestCase
             'Maaf, saya tidak menemukan informasi yang relevan',
             (string) $response->json('answer')
         );
+    }
+
+    /**
+     * Test query menggunakan OpenAI API saat model OpenAI dipilih.
+     */
+    public function test_query_uses_openai_api_when_configured()
+    {
+        Setting::setVal('rag_model', 'openai-gpt-4o-mini');
+        Setting::setVal('rag_temperature', 0.3);
+        Setting::setVal('rag_system_prompt', 'Anda adalah SIMAK, Asisten Virtual SSC.');
+
+        Document::create([
+            'title' => self::DOC_TITLE_MAGANG,
+            'type' => 'pdf',
+            'status' => 'active',
+            'uploaded_by' => $this->user->id,
+            'content' => 'Pendaftaran magang dilakukan melalui portal SIMAK dengan melampirkan CV dan transkrip.',
+        ]);
+
+        config()->set('services.openai.api_key', 'test-openai-key');
+
+        Http::fake([
+            'https://api.openai.com/*' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => 'Jawaban OpenAI: Pendaftaran magang dilakukan melalui portal SIMAK dengan CV dan transkrip.',
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.query'), [
+                'query' => 'Bagaimana cara daftar magang?',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertStringContainsString('Jawaban OpenAI:', $response->json('answer'));
+        $response->assertJsonFragment([
+            'title' => self::DOC_TITLE_MAGANG,
+        ]);
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/chat/completions')
+                && data_get($request->data(), 'model') === 'gpt-4o-mini';
+        });
+    }
+
+    /**
+     * Test sync memperbarui kb_last_updated_at di settings.
+     */
+    public function test_sync_updates_kb_last_updated_timestamp()
+    {
+        Document::create([
+            'title' => 'Panduan KP',
+            'type' => 'pdf',
+            'status' => 'active',
+            'uploaded_by' => $this->user->id,
+            'file_size' => 1024,
+        ]);
+
+        $response = $this->actingAs($this->user, 'web')
+            ->postJson(route('dashboard.knowledge-base.sync'));
+
+        $response->assertStatus(200);
+        $response->assertJson(['success' => true]);
+        $response->assertJsonStructure(['kb_last_updated']);
+
+        // Pastikan timestamp disimpan ke settings
+        $this->assertNotNull(Setting::getVal('kb_last_updated_at'));
     }
 }

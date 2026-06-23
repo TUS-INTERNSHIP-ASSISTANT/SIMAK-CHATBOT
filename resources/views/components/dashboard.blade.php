@@ -199,8 +199,8 @@
                 <h1 class="text-2xl font-bold text-gray-900 mt-1" x-text="greeting"></h1>
             </div>
 
-            {{-- ── Stats Cards (2×2 grid) ───────────────────────────────── --}}
-            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5 mb-8">
+            {{-- ── Stats Cards (2×1 grid) ───────────────────────────────── --}}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-8">
 
                 {{-- Card 1: Dokumen Aktif --}}
                 <div

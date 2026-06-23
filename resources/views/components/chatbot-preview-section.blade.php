@@ -22,12 +22,12 @@
                 </div>
 
                 <h3 class="text-2xl md:text-3xl font-bold text-gray-900 leading-tight">
-                    Tanya SIMAK dan temukan jawaban lebih cepat.
+                    Tanya SIMAK seputar Magang dan Kerja Praktik
                 </h3>
 
                 <p class="mt-4 text-gray-600 leading-relaxed max-w-xl">
-                    Silakan ketik pertanyaan Anda atau pilih pertanyaan yang sering diajukan di bawah ini untuk
-                    langsung memulai percakapan dengan SIMAK.
+                    Dapatkan informasi mengenai persyaratan, dokumen, alur pengajuan, dan pedoman Magang maupun Kerja
+                    Praktik secara cepat melalui Asisten Virtual SIMAK.
                 </p>
 
                 <div class="mt-8 flex flex-wrap gap-3">
@@ -99,8 +99,23 @@
                                 <div
                                     class="rounded-2xl rounded-tl-sm bg-white border border-gray-100 px-4 py-3 shadow-sm">
                                     <p class="text-sm text-gray-700 leading-relaxed">
-                                        Halo! 👋 Saya Asisten SIMAK. Silakan tanyakan seputar Magang dan Kerja Praktik.
+                                        Halo! 👋 Saya <strong>SIMAK</strong>, Asisten Virtual Student Service Center
+                                        (SSC) Telkom University Surabaya. Saya siap membantu menjawab pertanyaan seputar
+                                        Magang dan Kerja Praktik.
                                     </p>
+                                    @php
+                                        try {
+                                            $kbLastUpdated = \App\Models\Setting::getVal('kb_last_updated_at');
+                                        } catch (\Exception $e) {
+                                            $kbLastUpdated = null;
+                                        }
+                                    @endphp
+                                    @if($kbLastUpdated)
+                                        <p class="mt-2 text-[11px] text-gray-400">
+                                            📅 Basis pengetahuan terakhir diperbarui: <span
+                                                class="font-medium">{{ $kbLastUpdated }}</span>
+                                        </p>
+                                    @endif
                                 </div>
                                 <p class="mt-1 text-[11px] text-gray-400">SIMAK • Sekarang</p>
                             </div>
@@ -185,6 +200,8 @@
         }
     }
 
+    let landingChatHistory = [];
+
     function submitLandingChatForm(e) {
         if (e) e.preventDefault();
 
@@ -214,9 +231,15 @@
         typingIndicator.classList.remove('hidden');
         chatContainer.scrollTop = chatContainer.scrollHeight;
 
+        // Prepare history to send (max 4 messages)
+        const historyToSend = landingChatHistory.slice(-4);
+        
+        // Push current query to history
+        landingChatHistory.push({ role: 'user', content: query });
+
         fetch("{{ route('chatbot.query') }}", {
             method: 'POST',
-            body: JSON.stringify({ query: query }),
+            body: JSON.stringify({ query: query, history: historyToSend }),
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': '{{ csrf_token() }}',
@@ -227,6 +250,7 @@
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
+                    landingChatHistory.push({ role: 'assistant', content: data.answer });
                     appendLandingBotMessage(data.answer, data.source);
                 } else {
                     appendLandingBotMessage('Maaf, saya sedang mengalami kendala. Silakan coba lagi nanti.');
@@ -308,21 +332,18 @@
     }
 
     function escapeHTML(str) {
-        return str.replace(/[&<>'"]/g,
-            tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+        return str.replace(/[&<>"']/g,
+            tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[tag] || tag)
         );
     }
 
     function formatMarkdown(text) {
         if (!text) return '';
 
-        // First, escape HTML characters to prevent XSS
-        let escaped = escapeHTML(text);
-
         // Split text by lines to handle block elements (headings, lists, paragraphs)
-        const lines = escaped.split('\n');
+        const lines = text.split('\n');
         let htmlResult = [];
-        let currentListType = null; // 'ul', 'ol', or null
+        let currentListType = null;
 
         function closeList() {
             if (currentListType) {
@@ -336,13 +357,12 @@
             let trimmed = line.trim();
 
             // 1. Heading Markdown (e.g. ### Heading)
-            const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+            const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
             if (headingMatch) {
                 closeList();
                 const level = headingMatch[1].length;
-                const headingText = headingMatch[2];
-                const formattedText = formatInlineMarkdown(headingText);
-                
+                const formattedText = formatInlineMarkdown(headingMatch[2]);
+
                 let headingClass = 'font-bold text-gray-900 my-2 block';
                 if (level === 1) headingClass += ' text-lg text-[#7A203A]';
                 else if (level === 2) headingClass += ' text-md text-[#7A203A]';
@@ -353,10 +373,9 @@
             }
 
             // 2. Unordered List Markdown (e.g. - item or * item)
-            const ulMatch = line.match(/^(\s*)[-*]\s+(.+)$/);
+            const ulMatch = trimmed.match(/^[-*]\s+(.+)$/);
             if (ulMatch) {
-                const listContent = ulMatch[2];
-                const formattedContent = formatInlineMarkdown(listContent);
+                const formattedContent = formatInlineMarkdown(ulMatch[1]);
                 if (currentListType !== 'ul') {
                     closeList();
                     htmlResult.push('<ul class="list-disc pl-5 my-2 space-y-1">');
@@ -367,10 +386,9 @@
             }
 
             // 3. Ordered List Markdown (e.g. 1. item)
-            const olMatch = line.match(/^(\s*)\d+\.\s+(.+)$/);
+            const olMatch = trimmed.match(/^\d+\.\s+(.+)$/);
             if (olMatch) {
-                const listContent = olMatch[2];
-                const formattedContent = formatInlineMarkdown(listContent);
+                const formattedContent = formatInlineMarkdown(olMatch[1]);
                 if (currentListType !== 'ol') {
                     closeList();
                     htmlResult.push('<ol class="list-decimal pl-5 my-2 space-y-1">');
@@ -390,23 +408,62 @@
                 continue;
             }
 
-            // 5. Normal text line (or continuation of a paragraph)
+            // 5. Normal text line
             closeList();
-            const formattedLine = formatInlineMarkdown(line);
-            htmlResult.push(`<p class="text-sm text-gray-700 leading-relaxed mb-2">${formattedLine}</p>`);
+            htmlResult.push(`<p class="text-sm text-gray-700 leading-relaxed mb-2">${formatInlineMarkdown(line)}</p>`);
         }
 
         closeList();
-
         return htmlResult.join('\n');
     }
 
     function formatInlineMarkdown(text) {
-        // Bold: **text**
-        let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900">$1</strong>');
-        // Italic: *text* or _text_
-        formatted = formatted.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
-        formatted = formatted.replace(/_(.*?)_/g, '<em class="italic">$1</em>');
-        return formatted;
+        if (!text) return '';
+
+        const placeholders = [];
+        let processed = text;
+
+        // 1. Ekstrak markdown links [teks](url) sebelum escaping HTML
+        processed = processed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (match, linkText, url) => {
+            const idx = placeholders.length;
+            placeholders.push({ type: 'mdlink', text: linkText, url: url });
+            return `\x00PH${idx}\x00`;
+        });
+
+        // 2. Ekstrak bare URLs
+        processed = processed.replace(/(https?:\/\/[^\s<>"{}|\\^`[\]]*[^\s<>"{}|\\^`[\].,;:!?()'])/g, (match) => {
+            const idx = placeholders.length;
+            placeholders.push({ type: 'url', url: match });
+            return `\x00PH${idx}\x00`;
+        });
+
+        // 3. Escape HTML pada sisa teks
+        let result = processed.replace(/[&<>"']/g, tag => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[tag] || tag));
+
+        // 4. Terapkan bold dan italic
+        result = result.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900">$1</strong>');
+        result = result.replace(/\*([^*]+)\*/g, '<em class="italic">$1</em>');
+        result = result.replace(/_([^_]+)_/g, '<em class="italic">$1</em>');
+
+        // 5. Kembalikan placeholder URL sebagai hyperlink aktif
+        result = result.replace(/\x00PH(\d+)\x00/g, (match, idx) => {
+            const p = placeholders[parseInt(idx)];
+            const safeUrl = p.url.replace(/"/g, '%22').replace(/'/g, '%27').replace(/</g, '%3C').replace(/>/g, '%3E');
+            if (p.type === 'mdlink') {
+                const safeText = p.text.replace(/[&<>"']/g, tag => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[tag] || tag));
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[#7A203A] underline hover:text-[#5A182C] break-all">${safeText}</a>`;
+            } else {
+                const displayUrl = p.url.replace(/[&<>"']/g, tag => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+                }[tag] || tag));
+                return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="text-[#7A203A] underline hover:text-[#5A182C] break-all">${displayUrl}</a>`;
+            }
+        });
+
+        return result;
     }
 </script>

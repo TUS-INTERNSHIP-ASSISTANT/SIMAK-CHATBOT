@@ -1,5 +1,8 @@
 # SIMAK CHATBOT
 SIMAK (Sistem Informasi Magang dan Kerja Praktik) adalah layanan chatbot berbasis Artificial Intelligence (AI) yang membantu mahasiswa memperoleh informasi terkait Magang dan Kerja Praktik secara cepat dan praktis.
+
+email : staff@simak.com
+pass  : password
 # Rules Contributor
 **Writing Rules**
 - Penamaan file tidak boleh di singkat gunakan tanda `-` ketika ada spasi : `contoh : /home-page`
